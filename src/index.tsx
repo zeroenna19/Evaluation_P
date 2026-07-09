@@ -339,6 +339,46 @@ function getIndexHtml(): string {
   .tooltip { position: relative; }
   .tooltip:hover .tooltip-text { display:block; }
   .tooltip-text { display:none; position:absolute; bottom:100%; left:50%; transform:translateX(-50%); background:#1e293b; color:white; padding:4px 8px; border-radius:4px; font-size:11px; white-space:nowrap; z-index:10; }
+
+  /* 색상 설정 전용 */
+  :root {
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+    --sidebar-from: #312e81;
+    --sidebar-to: #3730a3;
+    --sidebar-border: #4338ca;
+    --body-bg: #f8fafc;
+    --card-bg: #ffffff;
+    --grade-S-bg: #fef3c7; --grade-S-fg: #92400e;
+    --grade-A-bg: #dcfce7; --grade-A-fg: #166534;
+    --grade-B-bg: #dbeafe; --grade-B-fg: #1e40af;
+    --grade-C-bg: #f3f4f6; --grade-C-fg: #374151;
+    --grade-D-bg: #fee2e2; --grade-D-fg: #991b1b;
+  }
+  .color-picker-inline {
+    width: 36px; height: 28px; padding: 2px; border: 1px solid #e2e8f0;
+    border-radius: 6px; cursor: pointer; background: white;
+  }
+  .color-picker-inline::-webkit-color-swatch-wrapper { padding: 2px; }
+  .color-picker-inline::-webkit-color-swatch { border: none; border-radius: 4px; }
+  .color-row-item {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 12px 16px; border: 1px solid #e2e8f0; border-radius: 10px;
+    background: white; transition: box-shadow 0.15s;
+  }
+  .color-row-item:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
+  .color-swatch {
+    width: 28px; height: 28px; border-radius: 6px; border: 2px solid rgba(0,0,0,0.08);
+    cursor: pointer; transition: transform 0.15s;
+  }
+  .color-swatch:hover { transform: scale(1.1); }
+  .theme-preset-btn {
+    display: flex; align-items: center; gap-8px; padding: 8px 14px;
+    border-radius: 10px; border: 2px solid transparent; cursor: pointer;
+    font-size: 12px; font-weight: 500; transition: all 0.15s;
+  }
+  .theme-preset-btn:hover { border-color: var(--accent); }
+  .theme-preset-btn.selected { border-color: var(--accent); box-shadow: 0 0 0 2px rgba(99,102,241,0.2); }
 </style>
 </head>
 <body class="bg-slate-50 min-h-screen">
@@ -377,6 +417,9 @@ function getIndexHtml(): string {
     </button>
     <button onclick="showPage('periods')" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left" data-page="periods">
       <i class="fas fa-calendar w-4"></i> 평가 기간 관리
+    </button>
+    <button onclick="showPage('colors')" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left" data-page="colors">
+      <i class="fas fa-palette w-4"></i> 색상 설정
     </button>
   </nav>
   <div class="p-4 border-t border-indigo-700">
@@ -529,10 +572,138 @@ function getIndexHtml(): string {
     <div id="page-periods" class="page-content hidden">
       <div id="periods-list" class="grid grid-cols-3 gap-4"></div>
     </div>
+
+    <!-- 색상 설정 페이지 -->
+    <div id="page-colors" class="page-content hidden">
+
+      <!-- UI 테마 섹션 -->
+      <div class="card p-6 mb-6">
+        <div class="flex items-center gap-3 mb-5">
+          <div class="w-8 h-8 rounded-lg bg-indigo-100 flex items-center justify-center">
+            <i class="fas fa-desktop text-indigo-600 text-sm"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800">UI 테마 색상</h3>
+            <p class="text-xs text-slate-500">사이드바·강조색·등급색을 변경합니다</p>
+          </div>
+          <button onclick="resetTheme()" class="ml-auto text-xs text-slate-400 hover:text-slate-600 border border-slate-200 rounded-lg px-3 py-1.5 transition">
+            <i class="fas fa-undo mr-1"></i>초기화
+          </button>
+        </div>
+
+        <!-- 테마 프리셋 -->
+        <div class="mb-5">
+          <p class="text-xs font-medium text-slate-600 mb-3">빠른 프리셋</p>
+          <div class="flex gap-3 flex-wrap" id="theme-presets"></div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-6">
+          <!-- 사이드바 색상 -->
+          <div>
+            <p class="text-xs font-semibold text-slate-600 mb-3 flex items-center gap-1.5">
+              <i class="fas fa-sidebar text-slate-400"></i> 사이드바
+            </p>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-500">상단 색상</span>
+                <div class="flex items-center gap-2">
+                  <div id="prev-sidebar-from" class="w-5 h-5 rounded border border-slate-200"></div>
+                  <input type="color" id="theme-sidebar-from" class="color-picker-inline" oninput="previewTheme()">
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-500">하단 색상</span>
+                <div class="flex items-center gap-2">
+                  <div id="prev-sidebar-to" class="w-5 h-5 rounded border border-slate-200"></div>
+                  <input type="color" id="theme-sidebar-to" class="color-picker-inline" oninput="previewTheme()">
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-500">테두리/서브텍스트</span>
+                <div class="flex items-center gap-2">
+                  <div id="prev-sidebar-border" class="w-5 h-5 rounded border border-slate-200"></div>
+                  <input type="color" id="theme-sidebar-border" class="color-picker-inline" oninput="previewTheme()">
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 강조색 -->
+          <div>
+            <p class="text-xs font-semibold text-slate-600 mb-3 flex items-center gap-1.5">
+              <i class="fas fa-star text-slate-400"></i> 강조색 (버튼·포커스·탭)
+            </p>
+            <div class="space-y-3">
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-500">기본 강조색</span>
+                <div class="flex items-center gap-2">
+                  <div id="prev-accent" class="w-5 h-5 rounded border border-slate-200"></div>
+                  <input type="color" id="theme-accent" class="color-picker-inline" oninput="previewTheme()">
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-500">배경색 (body)</span>
+                <div class="flex items-center gap-2">
+                  <div id="prev-bg" class="w-5 h-5 rounded border border-slate-200"></div>
+                  <input type="color" id="theme-bg" class="color-picker-inline" oninput="previewTheme()">
+                </div>
+              </div>
+              <div class="flex items-center justify-between">
+                <span class="text-xs text-slate-500">카드 배경</span>
+                <div class="flex items-center gap-2">
+                  <div id="prev-card" class="w-5 h-5 rounded border border-slate-200"></div>
+                  <input type="color" id="theme-card" class="color-picker-inline" oninput="previewTheme()">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 등급 색상 -->
+        <div class="mt-5 pt-5 border-t border-slate-100">
+          <p class="text-xs font-semibold text-slate-600 mb-3 flex items-center gap-1.5">
+            <i class="fas fa-award text-slate-400"></i> 등급 색상
+          </p>
+          <div class="grid grid-cols-5 gap-3" id="grade-color-row"></div>
+        </div>
+
+        <div class="mt-5 flex justify-end">
+          <button onclick="saveTheme()" class="bg-indigo-600 text-white px-5 py-2 rounded-lg text-sm hover:bg-indigo-700 transition font-medium">
+            <i class="fas fa-save mr-2"></i>테마 저장 적용
+          </button>
+        </div>
+      </div>
+
+      <!-- 직책 색상 섹션 -->
+      <div class="card p-6 mb-6">
+        <div class="flex items-center gap-3 mb-5">
+          <div class="w-8 h-8 rounded-lg bg-purple-100 flex items-center justify-center">
+            <i class="fas fa-id-badge text-purple-600 text-sm"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800">직책 색상</h3>
+            <p class="text-xs text-slate-500">보직별 구분 색상 — 차트·배지·보고서에 반영됩니다</p>
+          </div>
+        </div>
+        <div id="position-color-list" class="grid grid-cols-2 gap-4"></div>
+      </div>
+
+      <!-- 평가 영역 색상 섹션 -->
+      <div class="card p-6">
+        <div class="flex items-center gap-3 mb-5">
+          <div class="w-8 h-8 rounded-lg bg-sky-100 flex items-center justify-center">
+            <i class="fas fa-layer-group text-sky-600 text-sm"></i>
+          </div>
+          <div>
+            <h3 class="text-sm font-bold text-slate-800">평가 영역 색상</h3>
+            <p class="text-xs text-slate-500">업무 영역별 구분 색상 — 차트·프로그레스·레이더에 반영됩니다</p>
+          </div>
+        </div>
+        <div id="category-color-list" class="grid grid-cols-2 gap-4"></div>
+    </div>
+
   </div>
 </div>
-
-<!-- 관리자 추가/수정 모달 -->
 <div id="modal-manager" class="modal">
   <div class="bg-white rounded-xl w-96 p-6 mx-4">
     <h3 class="text-base font-bold text-slate-800 mb-4" id="modal-manager-title">관리자 추가</h3>
@@ -641,13 +812,15 @@ let state = {
   categories: [],
   editingManagerId: null,
   editingItemId: null,
-  charts: {}
+  charts: {},
+  theme: null        // 로드된 테마 객체
 }
 
 // ============================================================
 // 초기화
 // ============================================================
 async function init() {
+  applyStoredTheme()          // ① 저장된 테마 먼저 적용
   await Promise.all([
     loadPeriods(),
     loadManagers(),
@@ -738,7 +911,8 @@ function showPage(page) {
     report: ['개인 보고서', '관리자별 상세 평가 결과를 확인하세요'],
     managers: ['관리자 관리', '관리자 추가·수정·삭제'],
     items: ['평가 항목 관리', '직책별 평가 항목을 설정하세요'],
-    periods: ['평가 기간 관리', '월별 평가 기간을 관리하세요']
+    periods: ['평가 기간 관리', '월별 평가 기간을 관리하세요'],
+    colors: ['색상 설정', '직책·평가영역·UI 테마 색상을 자유롭게 바꾸세요']
   }
   const [title, sub] = titles[page] || ['', '']
   document.getElementById('page-title').textContent = title
@@ -750,6 +924,7 @@ function showPage(page) {
   else if (page === 'managers') loadManagersPage()
   else if (page === 'items') loadItemsPage()
   else if (page === 'periods') loadPeriodsPage()
+  else if (page === 'colors') loadColorsPage()
 }
 
 // ============================================================
@@ -1712,6 +1887,425 @@ document.querySelectorAll('.modal').forEach(modal => {
     if (e.target === modal) modal.classList.remove('open')
   })
 })
+
+// ============================================================
+// ★ 색상 설정 시스템
+// ============================================================
+
+// ── 테마 기본값 ──────────────────────────────────────────────
+const DEFAULT_THEME = {
+  sidebarFrom:   '#312e81',
+  sidebarTo:     '#3730a3',
+  sidebarBorder: '#4338ca',
+  accent:        '#6366f1',
+  accentHover:   '#4f46e5',
+  bodyBg:        '#f8fafc',
+  cardBg:        '#ffffff',
+  gradeSBg: '#fef3c7', gradeSFg: '#92400e',
+  gradeABg: '#dcfce7', gradeAFg: '#166534',
+  gradeBBg: '#dbeafe', gradeBFg: '#1e40af',
+  gradeCBg: '#f3f4f6', gradeCFg: '#374151',
+  gradeDBg: '#fee2e2', gradeDFg: '#991b1b',
+}
+
+// ── 테마 프리셋 ──────────────────────────────────────────────
+const THEME_PRESETS = [
+  { label: '기본 인디고', icon: '💜', sidebarFrom:'#312e81', sidebarTo:'#3730a3', sidebarBorder:'#4338ca', accent:'#6366f1', accentHover:'#4f46e5', bodyBg:'#f8fafc', cardBg:'#ffffff' },
+  { label: '네이비 블루', icon: '🔵', sidebarFrom:'#1e3a5f', sidebarTo:'#1e40af', sidebarBorder:'#1d4ed8', accent:'#2563eb', accentHover:'#1d4ed8', bodyBg:'#f0f4ff', cardBg:'#ffffff' },
+  { label: '에메랄드',    icon: '💚', sidebarFrom:'#064e3b', sidebarTo:'#065f46', sidebarBorder:'#047857', accent:'#059669', accentHover:'#047857', bodyBg:'#f0fdf4', cardBg:'#ffffff' },
+  { label: '로즈',       icon: '🌸', sidebarFrom:'#881337', sidebarTo:'#9f1239', sidebarBorder:'#be123c', accent:'#e11d48', accentHover:'#be123c', bodyBg:'#fff1f2', cardBg:'#ffffff' },
+  { label: '앰버',       icon: '🟡', sidebarFrom:'#78350f', sidebarTo:'#92400e', sidebarBorder:'#b45309', accent:'#d97706', accentHover:'#b45309', bodyBg:'#fffbeb', cardBg:'#ffffff' },
+  { label: '다크',       icon: '🌙', sidebarFrom:'#0f172a', sidebarTo:'#1e293b', sidebarBorder:'#334155', accent:'#818cf8', accentHover:'#6366f1', bodyBg:'#0f172a', cardBg:'#1e293b' },
+]
+
+// ── CSS 변수 적용 ────────────────────────────────────────────
+function applyCssVars(t) {
+  const r = document.documentElement.style
+  r.setProperty('--accent',         t.accent        || DEFAULT_THEME.accent)
+  r.setProperty('--accent-hover',   t.accentHover   || DEFAULT_THEME.accentHover)
+  r.setProperty('--sidebar-from',   t.sidebarFrom   || DEFAULT_THEME.sidebarFrom)
+  r.setProperty('--sidebar-to',     t.sidebarTo     || DEFAULT_THEME.sidebarTo)
+  r.setProperty('--sidebar-border', t.sidebarBorder || DEFAULT_THEME.sidebarBorder)
+  r.setProperty('--body-bg',        t.bodyBg        || DEFAULT_THEME.bodyBg)
+  r.setProperty('--card-bg',        t.cardBg        || DEFAULT_THEME.cardBg)
+  // 등급
+  const grades = ['S','A','B','C','D']
+  grades.forEach(g => {
+    r.setProperty(\`--grade-\${g}-bg\`, t[\`grade\${g}Bg\`] || DEFAULT_THEME[\`grade\${g}Bg\`])
+    r.setProperty(\`--grade-\${g}-fg\`, t[\`grade\${g}Fg\`] || DEFAULT_THEME[\`grade\${g}Fg\`])
+  })
+  // DOM에 직접 반영 (tailwind override)
+  applyThemeToDom(t)
+}
+
+function applyThemeToDom(t) {
+  // 사이드바
+  const sidebar = document.querySelector('.fixed.left-0.top-0.h-full')
+  if (sidebar) {
+    sidebar.style.background = \`linear-gradient(to bottom, \${t.sidebarFrom||DEFAULT_THEME.sidebarFrom}, \${t.sidebarTo||DEFAULT_THEME.sidebarTo})\`
+  }
+  // body 배경
+  document.body.style.backgroundColor = t.bodyBg || DEFAULT_THEME.bodyBg
+
+  // 카드 배경
+  const cards = document.querySelectorAll('.card')
+  cards.forEach(c => { c.style.backgroundColor = t.cardBg || DEFAULT_THEME.cardBg })
+
+  // 강조 버튼들
+  const accentBtns = document.querySelectorAll('.bg-indigo-600')
+  accentBtns.forEach(b => {
+    b.style.backgroundColor = t.accent || DEFAULT_THEME.accent
+  })
+
+  // 등급 색상
+  const gradeMap = {
+    'grade-S': [t.gradeSBg||DEFAULT_THEME.gradeSBg, t.gradeSFg||DEFAULT_THEME.gradeSFg],
+    'grade-A': [t.gradeABg||DEFAULT_THEME.gradeABg, t.gradeAFg||DEFAULT_THEME.gradeAFg],
+    'grade-B': [t.gradeBBg||DEFAULT_THEME.gradeBBg, t.gradeBFg||DEFAULT_THEME.gradeBFg],
+    'grade-C': [t.gradeCBg||DEFAULT_THEME.gradeCBg, t.gradeCFg||DEFAULT_THEME.gradeCFg],
+    'grade-D': [t.gradeDBg||DEFAULT_THEME.gradeDBg, t.gradeDFg||DEFAULT_THEME.gradeDFg],
+  }
+  Object.entries(gradeMap).forEach(([cls, [bg, fg]]) => {
+    document.querySelectorAll('.' + cls).forEach(el => {
+      el.style.backgroundColor = bg; el.style.color = fg
+    })
+  })
+
+  // 탭 active border
+  const style = document.getElementById('dynamic-theme-style') || (() => {
+    const s = document.createElement('style'); s.id = 'dynamic-theme-style'; document.head.appendChild(s); return s
+  })()
+  style.textContent = \`
+    .tab-btn.active { border-bottom-color: \${t.accent||DEFAULT_THEME.accent} !important; color: \${t.accent||DEFAULT_THEME.accent} !important; }
+    .score-input:focus { border-color: \${t.accent||DEFAULT_THEME.accent}; box-shadow: 0 0 0 2px \${(t.accent||DEFAULT_THEME.accent)}33; }
+    select:focus, input:focus, textarea:focus { border-color: \${t.accent||DEFAULT_THEME.accent} !important; }
+    .nav-item.active { background: rgba(255,255,255,0.15); }
+    .grade-S { background: \${t.gradeSBg||DEFAULT_THEME.gradeSBg} !important; color: \${t.gradeSFg||DEFAULT_THEME.gradeSFg} !important; }
+    .grade-A { background: \${t.gradeABg||DEFAULT_THEME.gradeABg} !important; color: \${t.gradeAFg||DEFAULT_THEME.gradeAFg} !important; }
+    .grade-B { background: \${t.gradeBBg||DEFAULT_THEME.gradeBBg} !important; color: \${t.gradeBFg||DEFAULT_THEME.gradeBFg} !important; }
+    .grade-C { background: \${t.gradeCBg||DEFAULT_THEME.gradeCBg} !important; color: \${t.gradeCFg||DEFAULT_THEME.gradeCFg} !important; }
+    .grade-D { background: \${t.gradeDBg||DEFAULT_THEME.gradeDBg} !important; color: \${t.gradeDFg||DEFAULT_THEME.gradeDFg} !important; }
+    .bg-indigo-600 { background-color: \${t.accent||DEFAULT_THEME.accent} !important; }
+    .bg-indigo-700, .hover\\:bg-indigo-700:hover { background-color: \${t.accentHover||DEFAULT_THEME.accentHover} !important; }
+    .border-indigo-700 { border-color: \${t.sidebarBorder||DEFAULT_THEME.sidebarBorder} !important; }
+    .text-indigo-300 { color: \${hexToRgba(t.accent||DEFAULT_THEME.accent, 0.6)} !important; }
+    .text-indigo-400 { color: \${hexToRgba(t.accent||DEFAULT_THEME.accent, 0.7)} !important; }
+    .text-indigo-600 { color: \${t.accent||DEFAULT_THEME.accent} !important; }
+    .focus\\:border-indigo-400:focus { border-color: \${t.accent||DEFAULT_THEME.accent} !important; }
+    .card { background-color: \${t.cardBg||DEFAULT_THEME.cardBg} !important; }
+    body { background-color: \${t.bodyBg||DEFAULT_THEME.bodyBg} !important; }
+  \`
+}
+
+function hexToRgba(hex, alpha) {
+  const r = parseInt(hex.slice(1,3),16), g = parseInt(hex.slice(3,5),16), b = parseInt(hex.slice(5,7),16)
+  return \`rgba(\${r},\${g},\${b},\${alpha})\`
+}
+
+function applyStoredTheme() {
+  try {
+    const saved = localStorage.getItem('lingo_theme')
+    if (saved) { state.theme = JSON.parse(saved); applyCssVars(state.theme) }
+    else { state.theme = { ...DEFAULT_THEME }; applyCssVars(state.theme) }
+  } catch(e) { state.theme = { ...DEFAULT_THEME }; applyCssVars(state.theme) }
+}
+
+// ── 색상 설정 페이지 렌더 ─────────────────────────────────────
+function loadColorsPage() {
+  renderThemePresets()
+  renderThemePickers()
+  renderPositionColors()
+  renderCategoryColors()
+}
+
+function renderThemePresets() {
+  const t = state.theme || DEFAULT_THEME
+  const container = document.getElementById('theme-presets')
+  container.innerHTML = THEME_PRESETS.map((p, i) => {
+    const isActive = p.accent === t.accent && p.sidebarFrom === t.sidebarFrom
+    return \`
+      <button onclick="applyPreset(\${i})" class="theme-preset-btn \${isActive ? 'selected' : ''}"
+        style="background:\${p.sidebarFrom}18; border-color:\${isActive ? p.accent : '#e2e8f0'}">
+        <div class="flex items-center gap-2">
+          <div class="flex gap-0.5">
+            <div class="w-3 h-5 rounded-l" style="background:\${p.sidebarFrom}"></div>
+            <div class="w-3 h-5 rounded-r" style="background:\${p.accent}"></div>
+          </div>
+          <span style="color:\${p.sidebarFrom}; font-size:12px">\${p.icon} \${p.label}</span>
+        </div>
+      </button>
+    \`
+  }).join('')
+}
+
+function applyPreset(idx) {
+  const preset = THEME_PRESETS[idx]
+  const t = state.theme || { ...DEFAULT_THEME }
+  // 프리셋은 테마 관련 키만 덮어씀 (등급 색상은 유지)
+  Object.assign(t, {
+    sidebarFrom: preset.sidebarFrom, sidebarTo: preset.sidebarTo,
+    sidebarBorder: preset.sidebarBorder, accent: preset.accent,
+    accentHover: preset.accentHover, bodyBg: preset.bodyBg, cardBg: preset.cardBg
+  })
+  state.theme = t
+  applyCssVars(t)
+  renderThemePickers()   // 피커 값 갱신
+  renderThemePresets()   // 선택 상태 갱신
+  showToast('\`' + preset.label + '\` 테마 미리보기 적용 (저장 버튼으로 확정)')
+}
+
+function renderThemePickers() {
+  const t = state.theme || DEFAULT_THEME
+  const setVal = (id, val) => {
+    const el = document.getElementById(id); if (el) el.value = val
+  }
+  const setPrev = (id, val) => {
+    const el = document.getElementById(id); if (el) el.style.backgroundColor = val
+  }
+  setVal('theme-sidebar-from',   t.sidebarFrom   || DEFAULT_THEME.sidebarFrom)
+  setVal('theme-sidebar-to',     t.sidebarTo     || DEFAULT_THEME.sidebarTo)
+  setVal('theme-sidebar-border', t.sidebarBorder || DEFAULT_THEME.sidebarBorder)
+  setVal('theme-accent',         t.accent        || DEFAULT_THEME.accent)
+  setVal('theme-bg',             t.bodyBg        || DEFAULT_THEME.bodyBg)
+  setVal('theme-card',           t.cardBg        || DEFAULT_THEME.cardBg)
+  setPrev('prev-sidebar-from',   t.sidebarFrom   || DEFAULT_THEME.sidebarFrom)
+  setPrev('prev-sidebar-to',     t.sidebarTo     || DEFAULT_THEME.sidebarTo)
+  setPrev('prev-sidebar-border', t.sidebarBorder || DEFAULT_THEME.sidebarBorder)
+  setPrev('prev-accent',         t.accent        || DEFAULT_THEME.accent)
+  setPrev('prev-bg',             t.bodyBg        || DEFAULT_THEME.bodyBg)
+  setPrev('prev-card',           t.cardBg        || DEFAULT_THEME.cardBg)
+
+  // 등급 색상 피커
+  const grades = [
+    { key:'S', label:'S 탁월함' },
+    { key:'A', label:'A 우수함' },
+    { key:'B', label:'B 양호함' },
+    { key:'C', label:'C 보통' },
+    { key:'D', label:'D 개선필요' },
+  ]
+  const gradeRow = document.getElementById('grade-color-row')
+  if (gradeRow) {
+    gradeRow.innerHTML = grades.map(g => \`
+      <div class="text-center">
+        <div class="text-xs text-slate-500 mb-2">\${g.label}</div>
+        <div class="flex flex-col items-center gap-1.5">
+          <div>
+            <div class="text-xs text-slate-400 mb-1">배경</div>
+            <div class="relative">
+              <div class="w-8 h-8 rounded-lg border border-slate-200 mx-auto mb-0.5" id="prev-grade-\${g.key}-bg"
+                style="background:\${t['grade'+g.key+'Bg']||DEFAULT_THEME['grade'+g.key+'Bg']}"></div>
+              <input type="color" class="color-picker-inline" id="grade-\${g.key}-bg"
+                value="\${t['grade'+g.key+'Bg']||DEFAULT_THEME['grade'+g.key+'Bg']}"
+                oninput="previewGradeColor('\${g.key}','bg',this.value)">
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-400 mb-1">글자</div>
+            <div>
+              <div class="w-8 h-8 rounded-lg border border-slate-200 mx-auto mb-0.5 flex items-center justify-center font-bold text-sm" id="prev-grade-\${g.key}-fg"
+                style="background:\${t['grade'+g.key+'Bg']||DEFAULT_THEME['grade'+g.key+'Bg']}; color:\${t['grade'+g.key+'Fg']||DEFAULT_THEME['grade'+g.key+'Fg']}">\${g.key}</div>
+              <input type="color" class="color-picker-inline" id="grade-\${g.key}-fg"
+                value="\${t['grade'+g.key+'Fg']||DEFAULT_THEME['grade'+g.key+'Fg']}"
+                oninput="previewGradeColor('\${g.key}','fg',this.value)">
+            </div>
+          </div>
+        </div>
+      </div>
+    \`).join('')
+  }
+}
+
+function previewGradeColor(grade, type, val) {
+  const t = state.theme || DEFAULT_THEME
+  t['grade' + grade + (type === 'bg' ? 'Bg' : 'Fg')] = val
+  state.theme = t
+  // 미리보기 스와치 갱신
+  const prevBg = document.getElementById(\`prev-grade-\${grade}-bg\`)
+  const prevFg = document.getElementById(\`prev-grade-\${grade}-fg\`)
+  if (prevBg) prevBg.style.backgroundColor = t['grade'+grade+'Bg']||DEFAULT_THEME['grade'+grade+'Bg']
+  if (prevFg) {
+    prevFg.style.backgroundColor = t['grade'+grade+'Bg']||DEFAULT_THEME['grade'+grade+'Bg']
+    prevFg.style.color = t['grade'+grade+'Fg']||DEFAULT_THEME['grade'+grade+'Fg']
+  }
+  applyCssVars(t)
+}
+
+function previewTheme() {
+  const t = state.theme || { ...DEFAULT_THEME }
+  t.sidebarFrom   = document.getElementById('theme-sidebar-from')?.value   || t.sidebarFrom
+  t.sidebarTo     = document.getElementById('theme-sidebar-to')?.value     || t.sidebarTo
+  t.sidebarBorder = document.getElementById('theme-sidebar-border')?.value || t.sidebarBorder
+  t.accent        = document.getElementById('theme-accent')?.value         || t.accent
+  t.accentHover   = t.accent
+  t.bodyBg        = document.getElementById('theme-bg')?.value             || t.bodyBg
+  t.cardBg        = document.getElementById('theme-card')?.value           || t.cardBg
+  state.theme = t
+  // 미리보기 스와치 갱신
+  const setP = (id, v) => { const el = document.getElementById(id); if(el) el.style.backgroundColor = v }
+  setP('prev-sidebar-from',   t.sidebarFrom)
+  setP('prev-sidebar-to',     t.sidebarTo)
+  setP('prev-sidebar-border', t.sidebarBorder)
+  setP('prev-accent',         t.accent)
+  setP('prev-bg',             t.bodyBg)
+  setP('prev-card',           t.cardBg)
+  applyCssVars(t)
+  renderThemePresets()
+}
+
+function saveTheme() {
+  previewTheme()
+  localStorage.setItem('lingo_theme', JSON.stringify(state.theme))
+  showToast('테마 색상이 저장되었습니다 ✓')
+  renderThemePresets()
+}
+
+function resetTheme() {
+  if (!confirm('테마를 기본값으로 초기화하시겠습니까?')) return
+  state.theme = { ...DEFAULT_THEME }
+  localStorage.removeItem('lingo_theme')
+  applyCssVars(state.theme)
+  renderThemePickers()
+  renderThemePresets()
+  showToast('테마가 초기화되었습니다')
+}
+
+// ── 직책 색상 ─────────────────────────────────────────────────
+function renderPositionColors() {
+  const container = document.getElementById('position-color-list')
+  if (!container) return
+  container.innerHTML = state.positions.map(pos => \`
+    <div class="color-row-item">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg flex items-center justify-center text-white text-sm font-bold"
+          id="pos-swatch-\${pos.id}" style="background:\${pos.color}">\${pos.name[0]}</div>
+        <div>
+          <div class="text-sm font-semibold text-slate-800">\${pos.name}</div>
+          <div class="text-xs text-slate-400" id="pos-hex-\${pos.id}">\${pos.color}</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="flex gap-1.5">
+          \${['#7c3aed','#2563eb','#059669','#d97706','#dc2626','#0891b2','#db2777','#65a30d'].map(c => \`
+            <button onclick="quickColorPos(\${pos.id},'\${c}')"
+              class="w-5 h-5 rounded-full border-2 transition hover:scale-110"
+              style="background:\${c}; border-color:\${pos.color===c?'#1e293b':'transparent'}"
+              title="\${c}"></button>
+          \`).join('')}
+        </div>
+        <input type="color" class="color-picker-inline" value="\${pos.color}"
+          id="pos-color-input-\${pos.id}"
+          oninput="onPositionColorInput(\${pos.id}, this.value)"
+          onchange="savePositionColor(\${pos.id}, this.value)">
+      </div>
+    </div>
+  \`).join('')
+}
+
+function onPositionColorInput(id, val) {
+  const swatch = document.getElementById(\`pos-swatch-\${id}\`)
+  const hex = document.getElementById(\`pos-hex-\${id}\`)
+  if (swatch) swatch.style.backgroundColor = val
+  if (hex) hex.textContent = val
+  // 빠른 선택 버튼 border 갱신
+  renderPositionColors()
+  // state 반영 (임시)
+  const pos = state.positions.find(p => p.id === id)
+  if (pos) pos.color = val
+  // 피커 값 복원
+  const input = document.getElementById(\`pos-color-input-\${id}\`)
+  if (input) input.value = val
+}
+
+async function quickColorPos(id, color) {
+  const pos = state.positions.find(p => p.id === id)
+  if (!pos) return
+  pos.color = color
+  await api('/positions/' + id, { method: 'PUT', body: JSON.stringify({ name: pos.name, color }) })
+  showToast(pos.name + ' 색상 변경 완료 ✓')
+  await loadPositions()
+  renderPositionColors()
+}
+
+async function savePositionColor(id, color) {
+  const pos = state.positions.find(p => p.id === id)
+  if (!pos) return
+  await api('/positions/' + id, { method: 'PUT', body: JSON.stringify({ name: pos.name, color }) })
+  showToast(pos.name + ' 색상 저장 ✓')
+  await loadPositions()
+  renderPositionColors()
+}
+
+// ── 평가 영역 색상 ────────────────────────────────────────────
+function renderCategoryColors() {
+  const container = document.getElementById('category-color-list')
+  if (!container) return
+  container.innerHTML = state.categories.map(cat => \`
+    <div class="color-row-item">
+      <div class="flex items-center gap-3">
+        <div class="w-9 h-9 rounded-lg flex items-center justify-center"
+          id="cat-swatch-\${cat.id}" style="background:\${cat.color}22; border: 2px solid \${cat.color}">
+          <i class="fas fa-layer-group text-xs" style="color:\${cat.color}"></i>
+        </div>
+        <div>
+          <div class="text-sm font-semibold text-slate-800">\${cat.name}</div>
+          <div class="text-xs text-slate-400" id="cat-hex-\${cat.id}">\${cat.color} · \${cat.max_score}점</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-2">
+        <div class="flex gap-1.5">
+          \${['#6366f1','#0ea5e9','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#f97316'].map(c => \`
+            <button onclick="quickColorCat(\${cat.id},'\${c}')"
+              class="w-5 h-5 rounded-full border-2 transition hover:scale-110"
+              style="background:\${c}; border-color:\${cat.color===c?'#1e293b':'transparent'}"
+              title="\${c}"></button>
+          \`).join('')}
+        </div>
+        <input type="color" class="color-picker-inline" value="\${cat.color}"
+          id="cat-color-input-\${cat.id}"
+          oninput="onCategoryColorInput(\${cat.id}, this.value)"
+          onchange="saveCategoryColor(\${cat.id}, this.value)">
+      </div>
+    </div>
+  \`).join('')
+}
+
+function onCategoryColorInput(id, val) {
+  const cat = state.categories.find(c => c.id === id)
+  if (cat) cat.color = val
+  const swatch = document.getElementById(\`cat-swatch-\${id}\`)
+  const hex = document.getElementById(\`cat-hex-\${id}\`)
+  if (swatch) {
+    swatch.style.background = val + '22'
+    swatch.style.borderColor = val
+    swatch.querySelector('i').style.color = val
+  }
+  if (hex) hex.textContent = val + ' · ' + (cat?.max_score||0) + '점'
+  renderCategoryColors()
+  const input = document.getElementById(\`cat-color-input-\${id}\`)
+  if (input) input.value = val
+}
+
+async function quickColorCat(id, color) {
+  const cat = state.categories.find(c => c.id === id)
+  if (!cat) return
+  await api('/categories/' + id, { method: 'PUT', body: JSON.stringify({
+    name: cat.name, max_score: cat.max_score, sort_order: cat.sort_order, color
+  })})
+  showToast(cat.name + ' 색상 변경 완료 ✓')
+  await loadCategories()
+  renderCategoryColors()
+}
+
+async function saveCategoryColor(id, color) {
+  const cat = state.categories.find(c => c.id === id)
+  if (!cat) return
+  await api('/categories/' + id, { method: 'PUT', body: JSON.stringify({
+    name: cat.name, max_score: cat.max_score, sort_order: cat.sort_order, color
+  })})
+  showToast(cat.name + ' 색상 저장 ✓')
+  await loadCategories()
+  renderCategoryColors()
+}
 
 // 초기화
 init()
