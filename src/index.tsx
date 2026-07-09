@@ -299,6 +299,11 @@ app.get('/', (c) => {
   return c.html(getIndexHtml())
 })
 
+// 색상 설정 전용 페이지 (별도 URL)
+app.get('/colors', (c) => {
+  return c.html(getColorsHtml())
+})
+
 function getIndexHtml(): string {
   return `<!DOCTYPE html>
 <html lang="ko">
@@ -385,14 +390,14 @@ function getIndexHtml(): string {
 
 <!-- 사이드바 -->
 <div class="fixed left-0 top-0 h-full w-64 bg-gradient-to-b from-indigo-900 to-indigo-800 text-white z-50 flex flex-col">
-  <div class="p-5 border-b border-indigo-700">
+  <div class="px-5 py-4 border-b border-white/10">
     <div class="flex items-center gap-3">
-      <div class="w-9 h-9 bg-white/20 rounded-lg flex items-center justify-center">
-        <i class="fas fa-chart-line text-white"></i>
+      <div class="w-9 h-9 bg-white/20 rounded-xl flex items-center justify-center flex-shrink-0">
+        <i class="fas fa-chart-line text-white text-sm"></i>
       </div>
-      <div>
-        <div class="text-sm font-bold leading-tight">링고 고객센터</div>
-        <div class="text-xs text-indigo-300">관리자 평가 시스템</div>
+      <div class="min-w-0">
+        <div class="text-sm font-bold text-white leading-tight tracking-wide">링고 고객센터</div>
+        <div class="text-xs text-indigo-200 font-medium mt-0.5">관리자 평가 시스템</div>
       </div>
     </div>
   </div>
@@ -406,8 +411,12 @@ function getIndexHtml(): string {
     <button onclick="showPage('report')" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left" data-page="report">
       <i class="fas fa-file-alt w-4"></i> 개인 보고서
     </button>
-    <div class="pt-3 pb-1">
-      <div class="text-xs text-indigo-400 uppercase tracking-wider px-3">관리</div>
+    <div class="pt-4 pb-1">
+      <div class="flex items-center gap-2 px-3">
+        <div class="flex-1 h-px bg-white/10"></div>
+        <span class="text-xs font-semibold text-white/50 tracking-widest uppercase">관리</span>
+        <div class="flex-1 h-px bg-white/10"></div>
+      </div>
     </div>
     <button onclick="showPage('managers')" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left" data-page="managers">
       <i class="fas fa-users w-4"></i> 관리자 관리
@@ -418,12 +427,22 @@ function getIndexHtml(): string {
     <button onclick="showPage('periods')" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left" data-page="periods">
       <i class="fas fa-calendar w-4"></i> 평가 기간 관리
     </button>
-    <button onclick="showPage('colors')" class="nav-item w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm text-left" data-page="colors">
-      <i class="fas fa-palette w-4"></i> 색상 설정
-    </button>
   </nav>
-  <div class="p-4 border-t border-indigo-700">
-    <div id="period-selector" class="text-xs text-indigo-300"></div>
+  <!-- 하단 현재 기간 표시 -->
+  <div class="px-4 py-3 border-t border-white/10 bg-white/5">
+    <div class="flex items-center gap-2">
+      <div class="w-6 h-6 rounded-md bg-white/15 flex items-center justify-center flex-shrink-0">
+        <i class="fas fa-calendar-check text-white/80 text-xs"></i>
+      </div>
+      <div class="min-w-0 flex-1">
+        <div class="text-xs text-white/50 leading-tight">현재 평가 기간</div>
+        <div id="period-selector" class="text-xs font-semibold text-white truncate mt-0.5"></div>
+      </div>
+      <a href="/colors" target="_blank" title="색상 설정"
+        class="w-6 h-6 rounded-md bg-white/10 hover:bg-white/25 flex items-center justify-center transition flex-shrink-0">
+        <i class="fas fa-palette text-white/60 text-xs"></i>
+      </a>
+    </div>
   </div>
 </div>
 
@@ -2308,6 +2327,463 @@ async function saveCategoryColor(id, color) {
 }
 
 // 초기화
+init()
+</script>
+</body>
+</html>`
+}
+
+// ===================== 색상 설정 전용 페이지 HTML =====================
+function getColorsHtml(): string {
+  return `<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>색상 설정 — 링고 고객센터 평가 시스템</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css">
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700&display=swap');
+  * { font-family: 'Noto Sans KR', sans-serif; }
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  body { background: #f8fafc; }
+  .card { background: white; border-radius: 14px; box-shadow: 0 1px 4px rgba(0,0,0,0.07); }
+  .color-picker-inline { width: 38px; height: 30px; padding: 2px; border: 1.5px solid #e2e8f0; border-radius: 7px; cursor: pointer; background: white; }
+  .color-picker-inline::-webkit-color-swatch-wrapper { padding: 2px; }
+  .color-picker-inline::-webkit-color-swatch { border: none; border-radius: 4px; }
+  .color-row-item { display: flex; align-items: center; justify-content: space-between; padding: 13px 16px; border: 1.5px solid #f1f5f9; border-radius: 11px; background: #fafbfc; transition: all 0.15s; }
+  .color-row-item:hover { border-color: #c7d2fe; box-shadow: 0 2px 10px rgba(99,102,241,0.08); background: white; }
+  .quick-dot { width: 20px; height: 20px; border-radius: 50%; border: 2.5px solid transparent; cursor: pointer; transition: transform 0.12s; flex-shrink:0; }
+  .quick-dot:hover { transform: scale(1.18); }
+  .preset-card { border: 2px solid #e2e8f0; border-radius: 12px; padding: 12px 16px; cursor: pointer; transition: all 0.15s; background: white; }
+  .preset-card:hover { border-color: #a5b4fc; box-shadow: 0 4px 14px rgba(99,102,241,0.1); }
+  .preset-card.active { border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99,102,241,0.15); }
+  .section-badge { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+  input[type=color]::-webkit-color-swatch-wrapper { padding: 0; }
+  .back-btn { display: inline-flex; align-items: center; gap: 6px; padding: 8px 16px; border-radius: 9px; font-size: 13px; font-weight: 500; color: #64748b; background: white; border: 1.5px solid #e2e8f0; cursor: pointer; transition: all 0.15s; }
+  .back-btn:hover { background: #f1f5f9; color: #334155; }
+  .save-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 20px; border-radius: 9px; font-size: 13px; font-weight: 600; color: white; background: #6366f1; border: none; cursor: pointer; transition: background 0.15s; }
+  .save-btn:hover { background: #4f46e5; }
+  .reset-btn { display: inline-flex; align-items: center; gap: 6px; padding: 9px 16px; border-radius: 9px; font-size: 13px; font-weight: 500; color: #64748b; background: white; border: 1.5px solid #e2e8f0; cursor: pointer; transition: all 0.15s; }
+  .reset-btn:hover { background: #fee2e2; color: #991b1b; border-color: #fca5a5; }
+  #toast { transition: opacity 0.3s; }
+</style>
+</head>
+<body>
+
+<!-- 상단 헤더 -->
+<header class="sticky top-0 z-40 bg-white border-b border-slate-200 shadow-sm">
+  <div class="max-w-5xl mx-auto px-6 py-3 flex items-center justify-between">
+    <div class="flex items-center gap-4">
+      <button class="back-btn" onclick="location.href='/'">
+        <i class="fas fa-arrow-left text-xs"></i> 메인으로
+      </button>
+      <div>
+        <h1 class="text-base font-bold text-slate-800 flex items-center gap-2">
+          <i class="fas fa-palette text-indigo-500"></i> 색상 설정
+        </h1>
+        <p class="text-xs text-slate-400">직책·평가영역·UI 테마 색상을 자유롭게 변경합니다</p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2">
+      <button class="reset-btn" onclick="resetTheme()"><i class="fas fa-undo text-xs"></i> 초기화</button>
+      <button class="save-btn" onclick="saveTheme()"><i class="fas fa-save text-xs"></i> 테마 저장</button>
+    </div>
+  </div>
+</header>
+
+<div class="max-w-5xl mx-auto px-6 py-8 space-y-8">
+
+  <!-- ① UI 테마 -->
+  <section class="card p-7">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-9 h-9 rounded-xl bg-indigo-50 flex items-center justify-center">
+        <i class="fas fa-desktop text-indigo-500"></i>
+      </div>
+      <div>
+        <h2 class="text-sm font-bold text-slate-800">UI 테마 색상</h2>
+        <p class="text-xs text-slate-500 mt-0.5">사이드바·버튼·강조색·배경을 변경합니다. 변경 내용은 메인 화면에 즉시 반영됩니다.</p>
+      </div>
+    </div>
+
+    <!-- 프리셋 -->
+    <div class="mb-6">
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">빠른 프리셋</p>
+      <div id="theme-presets" class="grid grid-cols-3 gap-3 sm:grid-cols-6"></div>
+    </div>
+
+    <!-- 색상 피커 그리드 -->
+    <div class="grid grid-cols-2 gap-6 mb-6">
+      <div>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">사이드바</p>
+        <div class="space-y-2.5">
+          <div class="color-row-item">
+            <span class="text-sm text-slate-600">상단 색상</span>
+            <div class="flex items-center gap-2">
+              <div id="prev-sidebar-from" class="w-6 h-6 rounded-lg border border-slate-200"></div>
+              <input type="color" id="theme-sidebar-from" class="color-picker-inline" oninput="previewTheme()">
+            </div>
+          </div>
+          <div class="color-row-item">
+            <span class="text-sm text-slate-600">하단 색상</span>
+            <div class="flex items-center gap-2">
+              <div id="prev-sidebar-to" class="w-6 h-6 rounded-lg border border-slate-200"></div>
+              <input type="color" id="theme-sidebar-to" class="color-picker-inline" oninput="previewTheme()">
+            </div>
+          </div>
+          <div class="color-row-item">
+            <span class="text-sm text-slate-600">구분선 색상</span>
+            <div class="flex items-center gap-2">
+              <div id="prev-sidebar-border" class="w-6 h-6 rounded-lg border border-slate-200"></div>
+              <input type="color" id="theme-sidebar-border" class="color-picker-inline" oninput="previewTheme()">
+            </div>
+          </div>
+        </div>
+      </div>
+      <div>
+        <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">강조색 / 배경</p>
+        <div class="space-y-2.5">
+          <div class="color-row-item">
+            <span class="text-sm text-slate-600">버튼·탭 강조색</span>
+            <div class="flex items-center gap-2">
+              <div id="prev-accent" class="w-6 h-6 rounded-lg border border-slate-200"></div>
+              <input type="color" id="theme-accent" class="color-picker-inline" oninput="previewTheme()">
+            </div>
+          </div>
+          <div class="color-row-item">
+            <span class="text-sm text-slate-600">페이지 배경</span>
+            <div class="flex items-center gap-2">
+              <div id="prev-bg" class="w-6 h-6 rounded-lg border border-slate-200"></div>
+              <input type="color" id="theme-bg" class="color-picker-inline" oninput="previewTheme()">
+            </div>
+          </div>
+          <div class="color-row-item">
+            <span class="text-sm text-slate-600">카드 배경</span>
+            <div class="flex items-center gap-2">
+              <div id="prev-card" class="w-6 h-6 rounded-lg border border-slate-200"></div>
+              <input type="color" id="theme-card" class="color-picker-inline" oninput="previewTheme()">
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 등급 색상 -->
+    <div>
+      <p class="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">등급 색상 (S · A · B · C · D)</p>
+      <div id="grade-color-row" class="grid grid-cols-5 gap-3"></div>
+    </div>
+  </section>
+
+  <!-- ② 직책 색상 -->
+  <section class="card p-7">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-9 h-9 rounded-xl bg-purple-50 flex items-center justify-center">
+        <i class="fas fa-id-badge text-purple-500"></i>
+      </div>
+      <div>
+        <h2 class="text-sm font-bold text-slate-800">직책 색상</h2>
+        <p class="text-xs text-slate-500 mt-0.5">보직별 구분 색상 · 차트·배지·보고서에 즉시 반영됩니다</p>
+      </div>
+    </div>
+    <div id="position-color-list" class="grid grid-cols-2 gap-3"></div>
+  </section>
+
+  <!-- ③ 평가 영역 색상 -->
+  <section class="card p-7">
+    <div class="flex items-center gap-3 mb-6">
+      <div class="w-9 h-9 rounded-xl bg-sky-50 flex items-center justify-center">
+        <i class="fas fa-layer-group text-sky-500"></i>
+      </div>
+      <div>
+        <h2 class="text-sm font-bold text-slate-800">평가 영역 색상</h2>
+        <p class="text-xs text-slate-500 mt-0.5">업무 영역별 색상 · 차트·프로그레스바·레이더에 즉시 반영됩니다</p>
+      </div>
+    </div>
+    <div id="category-color-list" class="grid grid-cols-2 gap-3"></div>
+  </section>
+
+</div>
+
+<!-- Toast -->
+<div id="toast" class="fixed bottom-6 right-6 z-50 hidden opacity-0">
+  <div class="bg-slate-800 text-white px-4 py-3 rounded-xl text-sm shadow-xl flex items-center gap-2">
+    <i id="toast-icon" class="fas fa-check-circle text-emerald-400"></i>
+    <span id="toast-msg"></span>
+  </div>
+</div>
+
+<script>
+// ============================================================
+// 색상 설정 전용 페이지 스크립트
+// ============================================================
+
+const DEFAULT_THEME = {
+  sidebarFrom:'#312e81', sidebarTo:'#3730a3', sidebarBorder:'#4338ca',
+  accent:'#6366f1', accentHover:'#4f46e5', bodyBg:'#f8fafc', cardBg:'#ffffff',
+  gradeSBg:'#fef3c7', gradeSFg:'#92400e',
+  gradeABg:'#dcfce7', gradeAFg:'#166534',
+  gradeBBg:'#dbeafe', gradeBFg:'#1e40af',
+  gradeCBg:'#f3f4f6', gradeCFg:'#374151',
+  gradeDBg:'#fee2e2', gradeDFg:'#991b1b',
+}
+
+const THEME_PRESETS = [
+  { label:'인디고',   icon:'💜', sidebarFrom:'#312e81', sidebarTo:'#3730a3', sidebarBorder:'#4338ca', accent:'#6366f1', accentHover:'#4f46e5', bodyBg:'#f8fafc', cardBg:'#ffffff' },
+  { label:'네이비',   icon:'🔵', sidebarFrom:'#1e3a5f', sidebarTo:'#1e40af', sidebarBorder:'#1d4ed8', accent:'#2563eb', accentHover:'#1d4ed8', bodyBg:'#f0f4ff', cardBg:'#ffffff' },
+  { label:'에메랄드', icon:'💚', sidebarFrom:'#064e3b', sidebarTo:'#065f46', sidebarBorder:'#047857', accent:'#059669', accentHover:'#047857', bodyBg:'#f0fdf4', cardBg:'#ffffff' },
+  { label:'로즈',     icon:'🌸', sidebarFrom:'#881337', sidebarTo:'#9f1239', sidebarBorder:'#be123c', accent:'#e11d48', accentHover:'#be123c', bodyBg:'#fff1f2', cardBg:'#ffffff' },
+  { label:'앰버',     icon:'🟡', sidebarFrom:'#78350f', sidebarTo:'#92400e', sidebarBorder:'#b45309', accent:'#d97706', accentHover:'#b45309', bodyBg:'#fffbeb', cardBg:'#ffffff' },
+  { label:'다크',     icon:'🌙', sidebarFrom:'#0f172a', sidebarTo:'#1e293b', sidebarBorder:'#334155', accent:'#818cf8', accentHover:'#6366f1', bodyBg:'#0f172a', cardBg:'#1e293b' },
+]
+
+const QUICK_COLORS = ['#6366f1','#2563eb','#059669','#d97706','#dc2626','#0891b2','#db2777','#65a30d','#7c3aed','#f97316','#64748b','#0f172a']
+
+let theme = {}
+let positions = []
+let categories = []
+
+async function init() {
+  loadTheme()
+  await Promise.all([loadPositions(), loadCategories()])
+  renderPresets()
+  renderPickers()
+  renderGradeColors()
+  renderPositionColors()
+  renderCategoryColors()
+}
+
+function loadTheme() {
+  try { theme = JSON.parse(localStorage.getItem('lingo_theme') || 'null') || { ...DEFAULT_THEME } }
+  catch { theme = { ...DEFAULT_THEME } }
+}
+
+async function loadPositions() {
+  const r = await fetch('/api/positions'); positions = await r.json()
+}
+async function loadCategories() {
+  const r = await fetch('/api/categories'); categories = await r.json()
+}
+
+// ── 프리셋 ──
+function renderPresets() {
+  const c = document.getElementById('theme-presets')
+  c.innerHTML = THEME_PRESETS.map((p, i) => {
+    const active = p.accent === theme.accent && p.sidebarFrom === theme.sidebarFrom
+    return \`<div class="preset-card \${active?'active':''}" onclick="applyPreset(\${i})">
+      <div class="flex items-center gap-2 mb-2">
+        <div class="flex gap-0.5 rounded overflow-hidden" style="width:28px;height:16px">
+          <div style="flex:1;background:\${p.sidebarFrom}"></div>
+          <div style="flex:1;background:\${p.accent}"></div>
+        </div>
+        <span style="color:\${p.sidebarFrom};font-size:11px;font-weight:600">\${p.icon}</span>
+      </div>
+      <div class="text-xs font-semibold text-slate-700">\${p.label}</div>
+    </div>\`
+  }).join('')
+}
+
+function applyPreset(i) {
+  const p = THEME_PRESETS[i]
+  Object.assign(theme, { sidebarFrom:p.sidebarFrom, sidebarTo:p.sidebarTo, sidebarBorder:p.sidebarBorder,
+    accent:p.accent, accentHover:p.accentHover, bodyBg:p.bodyBg, cardBg:p.cardBg })
+  renderPresets(); renderPickers()
+  applyPreviewStyle()
+  showToast('\`'+p.label+'\` 프리셋 적용 — 저장 버튼으로 확정하세요')
+}
+
+// ── 피커 ──
+function renderPickers() {
+  const set = (id, v) => { const el=document.getElementById(id); if(el){el.value=v||'#ffffff'} }
+  const prev = (id, v) => { const el=document.getElementById(id); if(el){el.style.background=v||'#fff'} }
+  set('theme-sidebar-from',   theme.sidebarFrom);   prev('prev-sidebar-from',   theme.sidebarFrom)
+  set('theme-sidebar-to',     theme.sidebarTo);     prev('prev-sidebar-to',     theme.sidebarTo)
+  set('theme-sidebar-border', theme.sidebarBorder); prev('prev-sidebar-border', theme.sidebarBorder)
+  set('theme-accent',         theme.accent);        prev('prev-accent',         theme.accent)
+  set('theme-bg',             theme.bodyBg);        prev('prev-bg',             theme.bodyBg)
+  set('theme-card',           theme.cardBg);        prev('prev-card',           theme.cardBg)
+}
+
+function previewTheme() {
+  theme.sidebarFrom   = document.getElementById('theme-sidebar-from')?.value   || theme.sidebarFrom
+  theme.sidebarTo     = document.getElementById('theme-sidebar-to')?.value     || theme.sidebarTo
+  theme.sidebarBorder = document.getElementById('theme-sidebar-border')?.value || theme.sidebarBorder
+  theme.accent        = document.getElementById('theme-accent')?.value         || theme.accent
+  theme.accentHover   = theme.accent
+  theme.bodyBg        = document.getElementById('theme-bg')?.value             || theme.bodyBg
+  theme.cardBg        = document.getElementById('theme-card')?.value           || theme.cardBg
+  const setP = (id, v) => { const el=document.getElementById(id); if(el) el.style.background=v }
+  setP('prev-sidebar-from', theme.sidebarFrom); setP('prev-sidebar-to', theme.sidebarTo)
+  setP('prev-sidebar-border', theme.sidebarBorder); setP('prev-accent', theme.accent)
+  setP('prev-bg', theme.bodyBg); setP('prev-card', theme.cardBg)
+  applyPreviewStyle(); renderPresets()
+}
+
+function applyPreviewStyle() {
+  // 이 페이지의 저장 버튼 색상 미리보기
+  document.querySelectorAll('.save-btn').forEach(b => b.style.background = theme.accent)
+}
+
+// ── 등급 색상 ──
+function renderGradeColors() {
+  const grades = [{k:'S',l:'S 탁월함'},{k:'A',l:'A 우수함'},{k:'B',l:'B 양호함'},{k:'C',l:'C 보통'},{k:'D',l:'D 개선필요'}]
+  document.getElementById('grade-color-row').innerHTML = grades.map(g => \`
+    <div class="border border-slate-100 rounded-xl p-4 text-center bg-slate-50">
+      <div class="text-xs font-semibold text-slate-500 mb-3">\${g.l}</div>
+      <div class="w-10 h-10 rounded-xl mx-auto mb-2 flex items-center justify-center font-bold text-base border border-slate-200"
+        id="grade-preview-\${g.k}"
+        style="background:\${theme['grade'+g.k+'Bg']||DEFAULT_THEME['grade'+g.k+'Bg']};color:\${theme['grade'+g.k+'Fg']||DEFAULT_THEME['grade'+g.k+'Fg']}">\${g.k}</div>
+      <div class="flex justify-center gap-2 mb-1">
+        <div>
+          <div class="text-xs text-slate-400 mb-1">배경</div>
+          <input type="color" class="color-picker-inline" id="grade-\${g.k}-bg"
+            value="\${theme['grade'+g.k+'Bg']||DEFAULT_THEME['grade'+g.k+'Bg']}"
+            oninput="onGradeColor('\${g.k}','bg',this.value)">
+        </div>
+        <div>
+          <div class="text-xs text-slate-400 mb-1">글자</div>
+          <input type="color" class="color-picker-inline" id="grade-\${g.k}-fg"
+            value="\${theme['grade'+g.k+'Fg']||DEFAULT_THEME['grade'+g.k+'Fg']}"
+            oninput="onGradeColor('\${g.k}','fg',this.value)">
+        </div>
+      </div>
+    </div>
+  \`).join('')
+}
+
+function onGradeColor(g, type, val) {
+  theme['grade'+g+(type==='bg'?'Bg':'Fg')] = val
+  const prev = document.getElementById('grade-preview-'+g)
+  if (prev) {
+    prev.style.background = theme['grade'+g+'Bg']||DEFAULT_THEME['grade'+g+'Bg']
+    prev.style.color      = theme['grade'+g+'Fg']||DEFAULT_THEME['grade'+g+'Fg']
+  }
+}
+
+// ── 직책 색상 ──
+function renderPositionColors() {
+  const c = document.getElementById('position-color-list')
+  c.innerHTML = positions.map(pos => \`
+    <div class="color-row-item" id="pos-row-\${pos.id}">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0"
+          id="pos-swatch-\${pos.id}" style="background:\${pos.color}">\${pos.name[0]}</div>
+        <div>
+          <div class="text-sm font-semibold text-slate-800">\${pos.name}</div>
+          <div class="text-xs font-mono text-slate-400 mt-0.5" id="pos-hex-\${pos.id}">\${pos.color}</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex gap-1.5 flex-wrap max-w-[160px]">
+          \${QUICK_COLORS.slice(0,8).map(c => \`
+            <button class="quick-dot" style="background:\${c};border-color:\${pos.color===c?'#1e293b':'transparent'}"
+              onclick="quickPos(\${pos.id},'\${c}')" title="\${c}"></button>
+          \`).join('')}
+        </div>
+        <input type="color" class="color-picker-inline" value="\${pos.color}"
+          id="pos-input-\${pos.id}" onchange="savePos(\${pos.id},this.value)"
+          oninput="livePos(\${pos.id},this.value)">
+      </div>
+    </div>
+  \`).join('')
+}
+
+function livePos(id, val) {
+  const sw = document.getElementById('pos-swatch-'+id); if(sw) sw.style.background = val
+  const hx = document.getElementById('pos-hex-'+id);   if(hx) hx.textContent = val
+  const pos = positions.find(p=>p.id===id); if(pos) pos.color = val
+}
+
+async function quickPos(id, color) {
+  const pos = positions.find(p=>p.id===id); if(!pos) return
+  await fetch('/api/positions/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:pos.name,color})})
+  pos.color = color; showToast(pos.name+' 색상 저장 ✓'); await loadPositions(); renderPositionColors()
+}
+
+async function savePos(id, color) {
+  const pos = positions.find(p=>p.id===id); if(!pos) return
+  await fetch('/api/positions/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:pos.name,color})})
+  showToast(pos.name+' 색상 저장 ✓'); await loadPositions(); renderPositionColors()
+}
+
+// ── 평가 영역 색상 ──
+function renderCategoryColors() {
+  const c = document.getElementById('category-color-list')
+  c.innerHTML = categories.map(cat => \`
+    <div class="color-row-item">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl flex items-center justify-center flex-shrink-0"
+          id="cat-swatch-\${cat.id}" style="background:\${cat.color}18;border:2px solid \${cat.color}">
+          <i class="fas fa-layer-group text-xs" style="color:\${cat.color}"></i>
+        </div>
+        <div>
+          <div class="text-sm font-semibold text-slate-800">\${cat.name}</div>
+          <div class="text-xs text-slate-400 mt-0.5"><span class="font-mono" id="cat-hex-\${cat.id}">\${cat.color}</span> · \${cat.max_score}점</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="flex gap-1.5 flex-wrap max-w-[160px]">
+          \${QUICK_COLORS.slice(0,8).map(c => \`
+            <button class="quick-dot" style="background:\${c};border-color:\${cat.color===c?'#1e293b':'transparent'}"
+              onclick="quickCat(\${cat.id},'\${c}')" title="\${c}"></button>
+          \`).join('')}
+        </div>
+        <input type="color" class="color-picker-inline" value="\${cat.color}"
+          id="cat-input-\${cat.id}" onchange="saveCat(\${cat.id},this.value)"
+          oninput="liveCat(\${cat.id},this.value)">
+      </div>
+    </div>
+  \`).join('')
+}
+
+function liveCat(id, val) {
+  const sw = document.getElementById('cat-swatch-'+id)
+  if (sw) { sw.style.background=val+'18'; sw.style.borderColor=val; sw.querySelector('i').style.color=val }
+  const hx = document.getElementById('cat-hex-'+id); if(hx) hx.textContent = val
+  const cat = categories.find(c=>c.id===id); if(cat) cat.color = val
+}
+
+async function quickCat(id, color) {
+  const cat = categories.find(c=>c.id===id); if(!cat) return
+  await fetch('/api/categories/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:cat.name,max_score:cat.max_score,sort_order:cat.sort_order,color})})
+  cat.color = color; showToast(cat.name+' 색상 저장 ✓'); await loadCategories(); renderCategoryColors()
+}
+
+async function saveCat(id, color) {
+  const cat = categories.find(c=>c.id===id); if(!cat) return
+  await fetch('/api/categories/'+id, {method:'PUT',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({name:cat.name,max_score:cat.max_score,sort_order:cat.sort_order,color})})
+  showToast(cat.name+' 색상 저장 ✓'); await loadCategories(); renderCategoryColors()
+}
+
+// ── 저장 / 초기화 ──
+function saveTheme() {
+  previewTheme()
+  localStorage.setItem('lingo_theme', JSON.stringify(theme))
+  showToast('테마 색상이 저장되었습니다 ✓')
+  renderPresets()
+}
+
+function resetTheme() {
+  if (!confirm('테마를 기본값으로 초기화하시겠습니까?')) return
+  theme = { ...DEFAULT_THEME }
+  localStorage.removeItem('lingo_theme')
+  renderPresets(); renderPickers(); renderGradeColors()
+  applyPreviewStyle()
+  showToast('테마가 기본값으로 초기화되었습니다')
+}
+
+// ── Toast ──
+let _tt = null
+function showToast(msg, err=false) {
+  const el=document.getElementById('toast'), ic=document.getElementById('toast-icon'), tx=document.getElementById('toast-msg')
+  tx.textContent=msg; ic.className='fas '+(err?'fa-exclamation-circle text-red-400':'fa-check-circle text-emerald-400')
+  el.classList.remove('hidden'); el.style.opacity='1'
+  if(_tt) clearTimeout(_tt); _tt=setTimeout(()=>{ el.style.opacity='0'; setTimeout(()=>el.classList.add('hidden'),300) },2800)
+}
+
 init()
 </script>
 </body>
