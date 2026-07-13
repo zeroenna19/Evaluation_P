@@ -72,6 +72,7 @@
 | `eval_categories` | id, name, max_score, sort_order, color, created_at | 평가 영역 5개 |
 | `eval_items` | id, category_id, position_id(nullable), item_name, criteria, max_score, sort_order, is_active, created_at | 평가 항목 27개 (공통+직책전용) |
 | `eval_periods` | id, year, month, label, is_active, **is_confirmed**, created_at | 평가 기간 (현재: 2026년 6월 반영완료, 2026년 7월 임시) |
+| `item_history` | id, item_id(nullable), action, item_name, category_name, position_name, max_score, reason, changed_at | 평가 항목 변경이력 (add/edit/delete) |
 | `eval_results` | id, manager_id, period_id, item_id, score, note, created_at, updated_at | 평가 결과 (UNIQUE 제약) |
 
 ---
@@ -99,13 +100,12 @@
 | GET | `/api/periods` | 평가 기간 목록 (is_confirmed 포함) |
 | POST | `/api/periods` | 평가 기간 추가 |
 | PUT | `/api/periods/:id/confirm` | 반영완료 토글 (is_confirmed 0↔1) |
+| GET | `/api/items/history` | 항목 변경이력 전체 조회 (최신순 200건) |
+| GET | `/api/items/score-check` | 직책별 활성 항목 배점 합산 (공통+전용, 100점 초과 감지) |
 | GET | `/api/results` | 평가 결과 조회 (manager_id, period_id 필터) |
 | POST | `/api/results/batch` | 평가 결과 일괄 저장 (INSERT OR REPLACE) |
+
 | GET | `/api/dashboard` | 대시보드 집계 데이터 — period_id 미지정 시 is_confirmed=1 최신 기간 자동 선택, **periodId** 응답 포함 |
-
----
-
-## 6. 프론트엔드 페이지(뷰) 목록
 
 SPA 방식 — URL 변경 없이 `showPage(name)` 함수로 섹션 전환
 
@@ -257,15 +257,15 @@ dist/_worker.js  (약 150~160 kB)
 
 | 항목 | 내용 |
 |------|------|
-| 최근 빌드 | 성공 (dist/_worker.js ~157 kB, 빌드 약 662ms) |
-| 서버 상태 | PM2 webapp (id:0) online, port 3000 |
-| Git 브랜치 | `main` |
-| 최근 커밋 | `78d7a1a` — "feat: 평가 기간 반영완료 기능 추가 + 대시보드 기본 기간 자동 선택" |
-| 미완료 작업 | 없음 |
-
 ---
 
-## 14. 운영 규칙 (필독)
+## 6. 프론트엔드 페이지(뷰) 목록
+
+| 최근 빌드 | 성공 (dist/_worker.js ~170 kB, 빌드 약 633ms) |
+| 서버 상태 | PM2 webapp (id:0) online, port 3000 |
+| Git 브랜치 | `main` |
+| 최근 커밋 | `7ee51ae` — "feat: 항목 변경이력·배점확인·추가시점·사유 입력 기능 추가" |
+| 미완료 작업 | 없음 |
 
 1. **새 기능 추가 시 메뉴 위치를 먼저 제안 → 확인 받고 개발 착수**
 2. favicon.ico 404는 정상 동작 (무시)
