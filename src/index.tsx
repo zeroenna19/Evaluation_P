@@ -170,6 +170,21 @@ app.post('/api/periods', async (c) => {
   return c.json({ id: r.meta.last_row_id })
 })
 
+// 반영완료 토글 (is_confirmed 0↔1)
+app.put('/api/periods/:id/confirm', async (c) => {
+  const id = c.req.param('id')
+  // 현재 상태 조회
+  const row: any = await c.env.DB.prepare(
+    'SELECT is_confirmed FROM eval_periods WHERE id = ?'
+  ).bind(id).first()
+  if (!row) return c.json({ error: 'not found' }, 404)
+  const next = row.is_confirmed === 1 ? 0 : 1
+  await c.env.DB.prepare(
+    'UPDATE eval_periods SET is_confirmed = ? WHERE id = ?'
+  ).bind(next, id).run()
+  return c.json({ id: Number(id), is_confirmed: next })
+})
+
 // ===================== EVAL RESULTS =====================
 app.get('/api/results', async (c) => {
   const periodId = c.req.query('period_id')
@@ -215,7 +230,22 @@ app.post('/api/results/batch', async (c) => {
 
 // ===================== DASHBOARD DATA =====================
 app.get('/api/dashboard', async (c) => {
-  const periodId = c.req.query('period_id') || '1'
+  // period_id 미지정 시 → is_confirmed=1 중 가장 최근 기간 자동 선택
+  // 반영완료 기간이 없으면 가장 최근 기간 사용
+  let periodId = c.req.query('period_id')
+  if (!periodId) {
+    const confirmed: any = await c.env.DB.prepare(
+      'SELECT id FROM eval_periods WHERE is_confirmed = 1 ORDER BY year DESC, month DESC LIMIT 1'
+    ).first()
+    if (confirmed) {
+      periodId = String(confirmed.id)
+    } else {
+      const latest: any = await c.env.DB.prepare(
+        'SELECT id FROM eval_periods ORDER BY year DESC, month DESC LIMIT 1'
+      ).first()
+      periodId = latest ? String(latest.id) : '1'
+    }
+  }
 
   // 1. 전체 요약
   const { results: summary } = await c.env.DB.prepare(`
@@ -291,7 +321,7 @@ app.get('/api/dashboard', async (c) => {
     ORDER BY m.id, ec.sort_order
   `).bind(periodId).all()
 
-  return c.json({ summary, byCategory, byPosition, managerCategory })
+  return c.json({ summary, byCategory, byPosition, managerCategory, periodId: Number(periodId) })
 })
 
 // ===================== STATIC & HTML =====================
@@ -455,6 +485,14 @@ function getIndexHtml(): string {
       <p id="page-sub" class="text-xs text-slate-500">전체 평가 현황을 한눈에 확인하세요</p>
     </div>
     <div class="flex items-center gap-3">
+      <!-- 반영완료 배지 (반영완료 기간 선택 시 표시) -->
+      <span id="confirmed-badge" class="hidden items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-700">
+        <i class="fas fa-check-circle text-xs"></i> 반영완료
+      </span>
+      <!-- 임시 배지 (임시 기간 선택 시 표시) -->
+      <span id="draft-badge" class="hidden items-center gap-1 text-xs font-semibold px-2.5 py-1 rounded-full bg-amber-100 text-amber-700">
+        <i class="fas fa-clock text-xs"></i> 임시
+      </span>
       <select id="global-period" onchange="onPeriodChange()" class="text-sm border border-slate-200 rounded-lg px-3 py-1.5 bg-white focus:outline-none focus:border-indigo-400">
       </select>
       <button onclick="showAddPeriodModal()" class="text-sm bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 transition">
@@ -589,6 +627,9 @@ function getIndexHtml(): string {
 
     <!-- 평가 기간 관리 페이지 -->
     <div id="page-periods" class="page-content hidden">
+      <div class="flex justify-between items-center mb-5">
+        <p class="text-sm text-slate-500">반영완료된 기간은 대시보드의 기본 표시 기간으로 우선 선택됩니다.</p>
+      </div>
       <div id="periods-list" class="grid grid-cols-3 gap-4"></div>
     </div>
 
@@ -889,15 +930,35 @@ async function loadCategories() {
 function renderPeriodSelect() {
   const sel = document.getElementById('global-period')
   sel.innerHTML = state.periods.map(p =>
-    \`<option value="\${p.id}">\${p.label}</option>\`
+    \`<option value="\${p.id}">\${p.label}\${p.is_confirmed ? ' ✓' : ' (임시)'}</option>\`
   ).join('')
   if (state.periods.length > 0) {
-    state.currentPeriodId = state.periods[0].id
+    // 반영완료 기간 중 가장 최근 → 없으면 첫 번째
+    const confirmed = state.periods.find(p => p.is_confirmed)
+    const defaultPeriod = confirmed || state.periods[0]
+    state.currentPeriodId = defaultPeriod.id
     sel.value = state.currentPeriodId
+    updatePeriodBadge(defaultPeriod)
   }
   const sideLabel = document.getElementById('period-selector')
-  if (sideLabel && state.periods.length > 0) {
-    sideLabel.textContent = state.periods[0].label
+  const defaultP = state.periods.find(p => p.id == state.currentPeriodId)
+  if (sideLabel && defaultP) sideLabel.textContent = defaultP.label
+}
+
+function updatePeriodBadge(period) {
+  const confirmedBadge = document.getElementById('confirmed-badge')
+  const draftBadge = document.getElementById('draft-badge')
+  if (!confirmedBadge || !draftBadge) return
+  if (period && period.is_confirmed) {
+    confirmedBadge.classList.remove('hidden')
+    confirmedBadge.classList.add('flex')
+    draftBadge.classList.add('hidden')
+    draftBadge.classList.remove('flex')
+  } else {
+    draftBadge.classList.remove('hidden')
+    draftBadge.classList.add('flex')
+    confirmedBadge.classList.add('hidden')
+    confirmedBadge.classList.remove('flex')
   }
 }
 
@@ -907,6 +968,7 @@ function onPeriodChange() {
   if (period) {
     const sideLabel = document.getElementById('period-selector')
     if (sideLabel) sideLabel.textContent = period.label
+    updatePeriodBadge(period)
   }
   if (state.currentPage === 'dashboard') loadDashboard()
   if (state.currentPage === 'evaluation') loadEvalForm()
@@ -953,7 +1015,20 @@ async function loadDashboard() {
   if (!state.currentPeriodId) return
   const data = await api('/dashboard?period_id=' + state.currentPeriodId)
   if (!data) return
-  
+
+  // API가 반환한 실제 period_id로 셀렉트 동기화 (초기 로드 시 자동 선택된 기간 반영)
+  if (data.periodId && data.periodId != state.currentPeriodId) {
+    state.currentPeriodId = data.periodId
+    const sel = document.getElementById('global-period')
+    if (sel) sel.value = data.periodId
+    const period = state.periods.find(p => p.id === data.periodId)
+    if (period) {
+      const sideLabel = document.getElementById('period-selector')
+      if (sideLabel) sideLabel.textContent = period.label
+      updatePeriodBadge(period)
+    }
+  }
+
   renderSummaryCards(data.summary)
   renderAllCharts(data)
   renderRankingTable(data.summary)
@@ -1845,19 +1920,37 @@ async function deleteItem(id, name) {
 // ============================================================
 async function loadPeriodsPage() {
   const container = document.getElementById('periods-list')
-  container.innerHTML = state.periods.map(p => \`
-    <div class="card p-5">
-      <div class="flex items-center justify-between">
+  container.innerHTML = state.periods.map(p => {
+    const isConfirmed = p.is_confirmed === 1
+    return \`
+    <div class="card p-5 \${isConfirmed ? 'ring-2 ring-emerald-400 ring-offset-1' : ''}">
+      <div class="flex items-start justify-between mb-4">
         <div>
-          <div class="text-base font-bold text-slate-800">\${p.label}</div>
-          <div class="text-xs text-slate-500 mt-1">\${p.year}년 \${p.month}월</div>
+          <div class="flex items-center gap-2 mb-1">
+            <div class="text-base font-bold text-slate-800">\${p.label}</div>
+            \${isConfirmed
+              ? \`<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-700"><i class="fas fa-check-circle mr-1"></i>반영완료</span>\`
+              : \`<span class="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-100 text-amber-700"><i class="fas fa-clock mr-1"></i>임시</span>\`
+            }
+          </div>
+          <div class="text-xs text-slate-500">\${p.year}년 \${p.month}월</div>
         </div>
-        <div class="w-10 h-10 bg-indigo-100 rounded-xl flex items-center justify-center">
-          <i class="fas fa-calendar text-indigo-600"></i>
+        <div class="w-10 h-10 \${isConfirmed ? 'bg-emerald-100' : 'bg-slate-100'} rounded-xl flex items-center justify-center flex-shrink-0">
+          <i class="fas fa-calendar \${isConfirmed ? 'text-emerald-600' : 'text-slate-400'}"></i>
         </div>
       </div>
+      <button
+        onclick="toggleConfirm(\${p.id})"
+        class="w-full text-xs font-semibold py-2 px-3 rounded-lg transition \${
+          isConfirmed
+            ? 'bg-slate-100 text-slate-600 hover:bg-red-50 hover:text-red-600'
+            : 'bg-emerald-600 text-white hover:bg-emerald-700'
+        }">
+        <i class="fas \${isConfirmed ? 'fa-times-circle' : 'fa-check-circle'} mr-1.5"></i>
+        \${isConfirmed ? '반영완료 취소' : '반영완료로 설정'}
+      </button>
     </div>
-  \`).join('')
+  \`}).join('')
 }
 
 function showAddPeriodModal() {
@@ -1880,6 +1973,22 @@ async function savePeriod() {
   showToast('기간 추가 완료 ✓')
   await loadPeriods()
   if (state.currentPage === 'periods') loadPeriodsPage()
+}
+
+async function toggleConfirm(periodId) {
+  const period = state.periods.find(p => p.id === periodId)
+  if (!period) return
+  const action = period.is_confirmed ? '반영완료를 취소' : '반영완료로 설정'
+  if (!confirm(\`"\${period.label}"을 \${action}하시겠습니까?\`)) return
+
+  const result = await api(\`/periods/\${periodId}/confirm\`, { method: 'PUT' })
+  if (!result) return
+
+  // 로컬 state 즉시 업데이트
+  period.is_confirmed = result.is_confirmed
+  renderPeriodSelect()
+  loadPeriodsPage()
+  showToast(result.is_confirmed ? \`\${period.label} 반영완료 설정 ✓\` : \`\${period.label} 임시로 변경 ✓\`)
 }
 
 // ============================================================
