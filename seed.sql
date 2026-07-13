@@ -24,51 +24,63 @@ INSERT OR IGNORE INTO eval_categories (id, name, max_score, sort_order, color) V
   (4, '고객 응대 품질 관리', 15, 4, '#f59e0b'),
   (5, '영업 지원 및 성과', 20, 5, '#ef4444');
 
--- 평가 항목 공통 (position_id = NULL이면 모든 직책 공통)
--- 1. 센터 운영 관리
-INSERT OR IGNORE INTO eval_items (id, category_id, position_id, item_name, criteria, max_score, sort_order) VALUES
-  (1,  1, NULL, '보고 체계',     '주간 성과 보고의 정확성·신속성',                        10, 1),
-  (2,  1, NULL, '근태 관리',     '팀원 출근·근태 관리 정확성',                             5,  2),
-  (3,  1, NULL, '업무 분배',     '주간 목표 및 스케줄 관리 능력',                          5,  3),
-  (4,  1, NULL, '일일 운영 보고','일일 상담현황, 이슈사항 정확한 보고 및 대응',              5,  4);
+-- 평가 항목 (position_id 컬럼 미사용 — 직책은 eval_item_positions 중간 테이블로 관리)
+-- 빈 배열 = 공통(전 직책), 중간 테이블 행 있음 = 전용
 
--- 2. 링고 서비스 전문성
-INSERT OR IGNORE INTO eval_items (id, category_id, position_id, item_name, criteria, max_score, sort_order) VALUES
-  (5,  2, NULL, '업무 숙지 이해도',    '통화연결음 서비스 기능 및 신청/변경 프로세스 숙지',          10, 1),
-  (6,  2, NULL, '협업 업무 능력',      'KT, KT알파, 기고센터, 스튜디오 등 타 업체와의 원활한 협업', 10, 2),
-  (7,  2, NULL, 'KT 서비스 연동 지식', 'KT 통신 인프라 및 관련 서비스 연계 이해도',               5,  3);
+-- 1. 센터 운영 관리 (공통)
+INSERT OR IGNORE INTO eval_items (id, category_id, item_name, criteria, max_score, sort_order) VALUES
+  (1,  1, '보고 체계',     '주간 성과 보고의 정확성·신속성',                        10, 1),
+  (2,  1, '근태 관리',     '팀원 출근·근태 관리 정확성',                             5,  2),
+  (3,  1, '업무 분배',     '주간 목표 및 스케줄 관리 능력',                          5,  3),
+  (4,  1, '일일 운영 보고','일일 상담현황, 이슈사항 정확한 보고 및 대응',              5,  4);
 
--- 3. 팀 리더십 및 육성
-INSERT OR IGNORE INTO eval_items (id, category_id, position_id, item_name, criteria, max_score, sort_order) VALUES
-  (8,  3, NULL, '팀원 관리',    '교육·코칭·동기부여 활동',                        5, 1),
-  (9,  3, NULL, '팀 동기부여',  '긍정적 조직문화 조성 및 상담원 동기 관리',       5, 2),
-  (10, 3, NULL, '커뮤니케이션', '타 부서와 협업 및 보고 능력',                    5, 3);
+-- 2. 링고 서비스 전문성 (공통)
+INSERT OR IGNORE INTO eval_items (id, category_id, item_name, criteria, max_score, sort_order) VALUES
+  (5,  2, '업무 숙지 이해도',    '통화연결음 서비스 기능 및 신청/변경 프로세스 숙지',          10, 1),
+  (6,  2, '협업 업무 능력',      'KT, KT알파, 기고센터, 스튜디오 등 타 업체와의 원활한 협업', 10, 2),
+  (7,  2, 'KT 서비스 연동 지식', 'KT 통신 인프라 및 관련 서비스 연계 이해도',               5,  3);
 
--- 4. 고객 응대 품질 관리 (상담팀장/센터장/강사/매니저 공통)
-INSERT OR IGNORE INTO eval_items (id, category_id, position_id, item_name, criteria, max_score, sort_order) VALUES
-  (11, 4, NULL, '상담 품질 모니터링', '정기적인 콜 모니터링 및 피드백 관리',              5, 1),
-  (12, 4, NULL, 'VOC 관리',          '고객 불만 및 건의사항 신속한 처리 및 분석',        5, 2),
-  (13, 4, NULL, '센터 목표 달성률',  '월간/분기별 센터 KPI 목표 달성도',                5, 3);
+-- 3. 팀 리더십 및 육성 (공통)
+INSERT OR IGNORE INTO eval_items (id, category_id, item_name, criteria, max_score, sort_order) VALUES
+  (8,  3, '팀원 관리',    '교육·코칭·동기부여 활동',                        5, 1),
+  (9,  3, '팀 동기부여',  '긍정적 조직문화 조성 및 상담원 동기 관리',       5, 2),
+  (10, 3, '커뮤니케이션', '타 부서와 협업 및 보고 능력',                    5, 3);
 
--- 4. 전산팀장 전용 - 고객센터 시스템 관리 (category_id=4 에 position_id=2 추가)
-INSERT OR IGNORE INTO eval_items (id, category_id, position_id, item_name, criteria, max_score, sort_order) VALUES
-  (21, 4, 2, '시스템 관리 모니터링', '일별 전산시스템 모니터링 및 점검일지 관리',                               5, 1),
-  (22, 4, 2, '장애 관리',           '네트워크, CTI, ARS 등 오류 발생 시 신속한 분석/대응 및 결과 보고',        5, 2),
-  (23, 4, 2, 'SLA 달성률',          'SLA(Service Level Agreement, 서비스 수준 계약) 달성률',                   5, 3);
+-- 4. 고객 응대 품질 관리 (공통 — 전산팀장 제외)
+INSERT OR IGNORE INTO eval_items (id, category_id, item_name, criteria, max_score, sort_order) VALUES
+  (11, 4, '상담 품질 모니터링', '정기적인 콜 모니터링 및 피드백 관리',              5, 1),
+  (12, 4, 'VOC 관리',          '고객 불만 및 건의사항 신속한 처리 및 분석',        5, 2),
+  (13, 4, '센터 목표 달성률',  '월간/분기별 센터 KPI 목표 달성도',                5, 3);
+
+-- 4. 전산팀장 전용 - 고객센터 시스템 관리
+INSERT OR IGNORE INTO eval_items (id, category_id, item_name, criteria, max_score, sort_order) VALUES
+  (21, 4, '시스템 관리 모니터링', '일별 전산시스템 모니터링 및 점검일지 관리',                               5, 1),
+  (22, 4, '장애 관리',           '네트워크, CTI, ARS 등 오류 발생 시 신속한 분석/대응 및 결과 보고',        5, 2),
+  (23, 4, 'SLA 달성률',          'SLA(Service Level Agreement, 서비스 수준 계약) 달성률',                   5, 3);
 
 -- 5. 영업 지원 및 성과 (공통)
-INSERT OR IGNORE INTO eval_items (id, category_id, position_id, item_name, criteria, max_score, sort_order) VALUES
-  (14, 5, NULL, '신규 및 업셀링 가입 유도', '링고 서비스 가입 유도 컨택 및 업그레이드 상품으로 전환 제안 실적', 5, 1),
-  (15, 5, NULL, '해지방어 활동',            '상품유지 시 장점, 고객맞춤 링고활용법 제안 등의 해지 방어 활동',  5, 2),
-  (16, 5, NULL, '혁신 활동',               '새로운 아이디어 제안 및 실행',                                    5, 3),
-  (17, 5, NULL, '자기 개발',               '직무 관련 학습·역량 강화 노력',                                  5, 4);
+INSERT OR IGNORE INTO eval_items (id, category_id, item_name, criteria, max_score, sort_order) VALUES
+  (14, 5, '신규 및 업셀링 가입 유도', '링고 서비스 가입 유도 컨택 및 업그레이드 상품으로 전환 제안 실적', 5, 1),
+  (15, 5, '해지방어 활동',            '상품유지 시 장점, 고객맞춤 링고활용법 제안 등의 해지 방어 활동',  5, 2),
+  (16, 5, '혁신 활동',               '새로운 아이디어 제안 및 실행',                                    5, 3),
+  (17, 5, '자기 개발',               '직무 관련 학습·역량 강화 노력',                                  5, 4);
 
 -- 5. 전산팀장 전용 영업 지원
-INSERT OR IGNORE INTO eval_items (id, category_id, position_id, item_name, criteria, max_score, sort_order) VALUES
-  (24, 5, 2, 'DB 관리 및 관련 시스템 지원', '영업DB 추출, 관리, 툴체크, 별도 신규DB 확보 등', 5, 1),
-  (25, 5, 2, '보안관리',                   '전산실 및 고객센터 내 보안관리',                  5, 2),
-  (26, 5, 2, '혁신 활동',                  '새로운 아이디어 제안 및 실행',                    5, 3),
-  (27, 5, 2, '자기 개발',                  '직무 관련 학습·역량 강화 노력',                  5, 4);
+INSERT OR IGNORE INTO eval_items (id, category_id, item_name, criteria, max_score, sort_order) VALUES
+  (24, 5, 'DB 관리 및 관련 시스템 지원', '영업DB 추출, 관리, 툴체크, 별도 신규DB 확보 등', 5, 1),
+  (25, 5, '보안관리',                   '전산실 및 고객센터 내 보안관리',                  5, 2),
+  (26, 5, '혁신 활동',                  '새로운 아이디어 제안 및 실행',                    5, 3),
+  (27, 5, '자기 개발',                  '직무 관련 학습·역량 강화 노력',                  5, 4);
+
+-- 직책 매핑 (eval_item_positions): 전산팀장(id=2) 전용 항목만 등록, 나머지는 공통
+-- 고객 응대 품질(11~13)은 전산팀장 제외 → 센터장(1)/강사(3)/매니저(4)/상담팀장(5) 전용
+INSERT OR IGNORE INTO eval_item_positions (item_id, position_id) VALUES
+  (11, 1),(11, 3),(11, 4),(11, 5),
+  (12, 1),(12, 3),(12, 4),(12, 5),
+  (13, 1),(13, 3),(13, 4),(13, 5),
+  -- 전산팀장 전용 항목
+  (21, 2),(22, 2),(23, 2),
+  (24, 2),(25, 2),(26, 2),(27, 2);
 
 -- 평가 기간
 INSERT OR IGNORE INTO eval_periods (id, year, month, label, is_confirmed) VALUES

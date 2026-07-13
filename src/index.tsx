@@ -89,6 +89,7 @@ app.get('/api/categories', async (c) => {
 
 app.post('/api/categories', async (c) => {
   const { name, max_score, sort_order, color } = await c.req.json()
+  if (!name) return c.json({ error: '영역명 필수' }, 400)
   const r = await c.env.DB.prepare(
     'INSERT INTO eval_categories (name, max_score, sort_order, color) VALUES (?,?,?,?)'
   ).bind(name, max_score || 20, sort_order || 99, color || '#6366f1').run()
@@ -98,6 +99,7 @@ app.post('/api/categories', async (c) => {
 app.put('/api/categories/:id', async (c) => {
   const id = c.req.param('id')
   const { name, max_score, sort_order, color } = await c.req.json()
+  if (!name) return c.json({ error: '영역명 필수' }, 400)
   await c.env.DB.prepare(
     'UPDATE eval_categories SET name=?, max_score=?, sort_order=?, color=? WHERE id=?'
   ).bind(name, max_score, sort_order, color, id).run()
@@ -106,6 +108,11 @@ app.put('/api/categories/:id', async (c) => {
 
 app.delete('/api/categories/:id', async (c) => {
   const id = c.req.param('id')
+  // 해당 영역에 속한 활성 항목 확인
+  const used: any = await c.env.DB.prepare(
+    'SELECT COUNT(*) as cnt FROM eval_items WHERE category_id=? AND is_active=1'
+  ).bind(id).first()
+  if (used?.cnt > 0) return c.json({ error: '해당 영역에 활성 항목이 있어 삭제할 수 없습니다.' }, 400)
   await c.env.DB.prepare('DELETE FROM eval_categories WHERE id=?').bind(id).run()
   return c.json({ ok: true })
 })
@@ -113,22 +120,48 @@ app.delete('/api/categories/:id', async (c) => {
 // ===================== EVAL ITEMS =====================
 app.get('/api/items', async (c) => {
   const positionId = c.req.query('position_id')
+  // 항목 기본 정보
   let query = `
-    SELECT ei.*, ec.name as category_name, ec.color as category_color,
-           p.name as position_name
+    SELECT ei.*, ec.name as category_name, ec.color as category_color
     FROM eval_items ei
     LEFT JOIN eval_categories ec ON ei.category_id = ec.id
-    LEFT JOIN positions p ON ei.position_id = p.id
     WHERE ei.is_active = 1
   `
   const params: any[] = []
   if (positionId) {
-    query += ' AND (ei.position_id IS NULL OR ei.position_id = ?)'
+    // 공통(중간테이블 행 없음) 또는 해당 직책 포함 항목
+    query += ` AND (NOT EXISTS (SELECT 1 FROM eval_item_positions eip WHERE eip.item_id = ei.id)
+               OR EXISTS (SELECT 1 FROM eval_item_positions eip WHERE eip.item_id = ei.id AND eip.position_id = ?))`
     params.push(positionId)
   }
   query += ' ORDER BY ec.sort_order, ei.sort_order'
   const { results } = await c.env.DB.prepare(query).bind(...params).all()
-  return c.json(results)
+
+  // 각 항목의 직책 목록 조회
+  const items = results as any[]
+  if (items.length > 0) {
+    const ids = items.map((i: any) => i.id).join(',')
+    const { results: posRows } = await c.env.DB.prepare(`
+      SELECT eip.item_id, p.id as position_id, p.name as position_name, p.color
+      FROM eval_item_positions eip
+      JOIN positions p ON eip.position_id = p.id
+      WHERE eip.item_id IN (${ids})
+    `).all()
+    // item별로 직책 배열 합산
+    const posMap: Record<number, any[]> = {}
+    ;(posRows as any[]).forEach((r: any) => {
+      if (!posMap[r.item_id]) posMap[r.item_id] = []
+      posMap[r.item_id].push({ id: r.position_id, name: r.position_name, color: r.color })
+    })
+    items.forEach((item: any) => {
+      item.positions = posMap[item.id] || []  // 공통이면 빈 배열
+      // 하위 호환: 단일 직책 필드도 유지 (첫 번째 직책 or null)
+      item.position_name = item.positions.length > 0
+        ? item.positions.map((p: any) => p.name).join(', ')
+        : null
+    })
+  }
+  return c.json(items)
 })
 
 // 변경이력 조회
@@ -144,19 +177,21 @@ app.get('/api/items/history', async (c) => {
 
 // 직책별 배점 합산 확인
 app.get('/api/items/score-check', async (c) => {
-  // 1. 직책별 전용 항목 합산
+  // 1. 직책별 전용 항목 합산 (중간 테이블 기준)
   const { results: byPos } = await c.env.DB.prepare(`
     SELECT p.id as position_id, p.name as position_name, p.color,
-           SUM(ei.max_score) as dedicated_score
+           COALESCE(SUM(ei.max_score), 0) as dedicated_score
     FROM positions p
-    LEFT JOIN eval_items ei ON ei.position_id = p.id AND ei.is_active = 1
+    LEFT JOIN eval_item_positions eip ON eip.position_id = p.id
+    LEFT JOIN eval_items ei ON ei.id = eip.item_id AND ei.is_active = 1
     GROUP BY p.id
     ORDER BY p.id
   `).all()
-  // 2. 공통 항목 합산
+  // 2. 공통 항목 합산 (중간 테이블에 행이 없는 항목 = 공통)
   const common: any = await c.env.DB.prepare(`
-    SELECT SUM(max_score) as common_score FROM eval_items
-    WHERE position_id IS NULL AND is_active = 1
+    SELECT COALESCE(SUM(max_score), 0) as common_score FROM eval_items
+    WHERE is_active = 1
+      AND NOT EXISTS (SELECT 1 FROM eval_item_positions eip WHERE eip.item_id = eval_items.id)
   `).first()
   const commonScore = common?.common_score || 0
   // 3. 직책별 총점 = 공통 + 전용
@@ -169,45 +204,70 @@ app.get('/api/items/score-check', async (c) => {
 })
 
 app.post('/api/items', async (c) => {
-  const { category_id, position_id, item_name, criteria, max_score, sort_order, reason } = await c.req.json()
+  const { category_id, position_ids, item_name, criteria, max_score, sort_order, reason } = await c.req.json()
+  // position_ids: number[] (빈 배열 = 공통)
   const r = await c.env.DB.prepare(
-    'INSERT INTO eval_items (category_id, position_id, item_name, criteria, max_score, sort_order) VALUES (?,?,?,?,?,?)'
-  ).bind(category_id, position_id || null, item_name, criteria || '', max_score || 5, sort_order || 99).run()
+    'INSERT INTO eval_items (category_id, item_name, criteria, max_score, sort_order) VALUES (?,?,?,?,?)'
+  ).bind(category_id, item_name, criteria || '', max_score || 5, sort_order || 99).run()
   const newId = r.meta.last_row_id
 
-  // 이력 기록 — 영역명·직책명 조회 후 스냅샷 저장
-  const snap: any = await c.env.DB.prepare(`
-    SELECT ec.name as category_name, p.name as position_name, ei.max_score
-    FROM eval_items ei
-    LEFT JOIN eval_categories ec ON ei.category_id = ec.id
-    LEFT JOIN positions p ON ei.position_id = p.id
-    WHERE ei.id = ?
-  `).bind(newId).first()
+  // 직책 중간 테이블 삽입
+  if (Array.isArray(position_ids) && position_ids.length > 0) {
+    const stmts = position_ids.map((pid: number) =>
+      c.env.DB.prepare('INSERT OR IGNORE INTO eval_item_positions (item_id, position_id) VALUES (?,?)').bind(newId, pid)
+    )
+    await c.env.DB.batch(stmts)
+  }
+
+  // 이력 기록
+  const snap: any = await c.env.DB.prepare(
+    'SELECT name as category_name FROM eval_categories WHERE id=?'
+  ).bind(category_id).first()
+  // 직책명 조합
+  let posName: string | null = null
+  if (Array.isArray(position_ids) && position_ids.length > 0) {
+    const { results: prows } = await c.env.DB.prepare(
+      `SELECT name FROM positions WHERE id IN (${position_ids.map(() => '?').join(',')})`
+    ).bind(...position_ids).all()
+    posName = (prows as any[]).map((p: any) => p.name).join(', ') || null
+  }
   await c.env.DB.prepare(
     'INSERT INTO item_history (item_id, action, item_name, category_name, position_name, max_score, reason) VALUES (?,?,?,?,?,?,?)'
-  ).bind(newId, 'add', item_name, snap?.category_name || '', snap?.position_name || null, snap?.max_score || max_score, reason || null).run()
+  ).bind(newId, 'add', item_name, snap?.category_name || '', posName, max_score || 5, reason || null).run()
 
   return c.json({ id: newId })
 })
 
 app.put('/api/items/:id', async (c) => {
   const id = c.req.param('id')
-  const { category_id, position_id, item_name, criteria, max_score, sort_order, is_active, reason } = await c.req.json()
+  const { category_id, position_ids, item_name, criteria, max_score, sort_order, is_active, reason } = await c.req.json()
   await c.env.DB.prepare(
-    'UPDATE eval_items SET category_id=?, position_id=?, item_name=?, criteria=?, max_score=?, sort_order=?, is_active=? WHERE id=?'
-  ).bind(category_id, position_id || null, item_name, criteria, max_score, sort_order, is_active ?? 1, id).run()
+    'UPDATE eval_items SET category_id=?, item_name=?, criteria=?, max_score=?, sort_order=?, is_active=? WHERE id=?'
+  ).bind(category_id, item_name, criteria, max_score, sort_order, is_active ?? 1, id).run()
+
+  // 직책 중간 테이블 교체 (기존 삭제 → 신규 삽입)
+  await c.env.DB.prepare('DELETE FROM eval_item_positions WHERE item_id=?').bind(Number(id)).run()
+  if (Array.isArray(position_ids) && position_ids.length > 0) {
+    const stmts = position_ids.map((pid: number) =>
+      c.env.DB.prepare('INSERT OR IGNORE INTO eval_item_positions (item_id, position_id) VALUES (?,?)').bind(Number(id), pid)
+    )
+    await c.env.DB.batch(stmts)
+  }
 
   // 이력 기록
-  const snap: any = await c.env.DB.prepare(`
-    SELECT ec.name as category_name, p.name as position_name, ei.max_score
-    FROM eval_items ei
-    LEFT JOIN eval_categories ec ON ei.category_id = ec.id
-    LEFT JOIN positions p ON ei.position_id = p.id
-    WHERE ei.id = ?
-  `).bind(id).first()
+  const snap: any = await c.env.DB.prepare(
+    'SELECT name as category_name FROM eval_categories WHERE id=?'
+  ).bind(category_id).first()
+  let posName: string | null = null
+  if (Array.isArray(position_ids) && position_ids.length > 0) {
+    const { results: prows } = await c.env.DB.prepare(
+      `SELECT name FROM positions WHERE id IN (${position_ids.map(() => '?').join(',')})`
+    ).bind(...position_ids).all()
+    posName = (prows as any[]).map((p: any) => p.name).join(', ') || null
+  }
   await c.env.DB.prepare(
     'INSERT INTO item_history (item_id, action, item_name, category_name, position_name, max_score, reason) VALUES (?,?,?,?,?,?,?)'
-  ).bind(Number(id), 'edit', item_name, snap?.category_name || '', snap?.position_name || null, snap?.max_score || max_score, reason || null).run()
+  ).bind(Number(id), 'edit', item_name, snap?.category_name || '', posName, max_score, reason || null).run()
 
   return c.json({ ok: true })
 })
@@ -216,21 +276,29 @@ app.delete('/api/items/:id', async (c) => {
   const id = c.req.param('id')
   const { reason } = await c.req.json().catch(() => ({ reason: null }))
 
-  // 삭제 전 스냅샷 저장
+  // 삭제 전 스냅샷
   const snap: any = await c.env.DB.prepare(`
-    SELECT ei.item_name, ec.name as category_name, p.name as position_name, ei.max_score
+    SELECT ei.item_name, ec.name as category_name, ei.max_score
     FROM eval_items ei
     LEFT JOIN eval_categories ec ON ei.category_id = ec.id
-    LEFT JOIN positions p ON ei.position_id = p.id
     WHERE ei.id = ?
   `).bind(id).first()
+
+  // 직책명 조합
+  let posName: string | null = null
+  const { results: prows } = await c.env.DB.prepare(`
+    SELECT p.name FROM eval_item_positions eip
+    JOIN positions p ON eip.position_id = p.id
+    WHERE eip.item_id = ?
+  `).bind(Number(id)).all()
+  if ((prows as any[]).length > 0) posName = (prows as any[]).map((p: any) => p.name).join(', ')
 
   await c.env.DB.prepare('UPDATE eval_items SET is_active=0 WHERE id=?').bind(id).run()
 
   if (snap) {
     await c.env.DB.prepare(
       'INSERT INTO item_history (item_id, action, item_name, category_name, position_name, max_score, reason) VALUES (?,?,?,?,?,?,?)'
-    ).bind(Number(id), 'delete', snap.item_name, snap.category_name || '', snap.position_name || null, snap.max_score, reason || null).run()
+    ).bind(Number(id), 'delete', snap.item_name, snap.category_name || '', posName, snap.max_score, reason || null).run()
   }
   return c.json({ ok: true })
 })
@@ -692,6 +760,24 @@ function getIndexHtml(): string {
 
     <!-- 평가 항목 관리 페이지 -->
     <div id="page-items" class="page-content hidden">
+      <!-- 평가 영역 관리 섹션 -->
+      <div class="card p-5 mb-5">
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <div class="w-7 h-7 rounded-lg bg-purple-100 flex items-center justify-center">
+              <i class="fas fa-layer-group text-purple-600 text-xs"></i>
+            </div>
+            <h3 class="text-sm font-bold text-slate-800">평가 영역 관리</h3>
+            <span class="text-xs text-slate-400">(영역 추가·수정·삭제)</span>
+          </div>
+          <button onclick="showCategoryModal()" class="text-xs bg-purple-600 text-white px-3 py-1.5 rounded-lg hover:bg-purple-700 transition flex items-center gap-1">
+            <i class="fas fa-plus"></i>영역 추가
+          </button>
+        </div>
+        <div id="categories-list" class="grid grid-cols-3 gap-3"></div>
+      </div>
+
+      <!-- 평가 항목 섹션 -->
       <div class="flex justify-between items-center mb-5">
         <div class="flex gap-3 items-center">
           <span class="text-sm text-slate-600">직책 필터:</span>
@@ -875,19 +961,17 @@ function getIndexHtml(): string {
 
 <!-- 평가 항목 추가/수정 모달 -->
 <div id="modal-item" class="modal">
-  <div class="bg-white rounded-xl w-[500px] p-6 mx-4">
+  <div class="bg-white rounded-xl w-[520px] p-6 mx-4">
     <h3 class="text-base font-bold text-slate-800 mb-4" id="modal-item-title">평가 항목 추가</h3>
     <div class="space-y-3">
-      <div class="grid grid-cols-2 gap-3">
-        <div>
-          <label class="text-xs text-slate-500 mb-1 block">평가 영역</label>
-          <select id="item-category" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-400"></select>
-        </div>
-        <div>
-          <label class="text-xs text-slate-500 mb-1 block">직책 (비어있으면 공통)</label>
-          <select id="item-position" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
-            <option value="">공통 (전체 직책)</option>
-          </select>
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">평가 영역</label>
+        <select id="item-category" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-400"></select>
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 mb-1.5 block">적용 직책 <span class="text-slate-400">(체크 없으면 전 직책 공통)</span></label>
+        <div id="item-positions-checks" class="flex flex-wrap gap-2 p-3 border border-slate-200 rounded-lg bg-slate-50 min-h-[44px]">
+          <!-- 체크박스 동적 생성 -->
         </div>
       </div>
       <div>
@@ -917,6 +1001,50 @@ function getIndexHtml(): string {
     <div class="flex gap-2 mt-5">
       <button onclick="saveItem()" class="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm hover:bg-indigo-700 transition">저장</button>
       <button onclick="closeModal('modal-item')" class="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg text-sm hover:bg-slate-200 transition">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 평가 영역 추가/수정 모달 -->
+<div id="modal-category" class="modal">
+  <div class="bg-white rounded-xl w-[400px] p-6 mx-4">
+    <h3 class="text-base font-bold text-slate-800 mb-4" id="modal-category-title">평가 영역 추가</h3>
+    <div class="space-y-3">
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">영역명</label>
+        <input id="cat-name" type="text" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-400" placeholder="예: 센터 운영 관리">
+      </div>
+      <div class="grid grid-cols-2 gap-3">
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">최대 배점</label>
+          <input id="cat-max-score" type="number" min="1" max="100" value="20" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+        </div>
+        <div>
+          <label class="text-xs text-slate-500 mb-1 block">순서</label>
+          <input id="cat-sort" type="number" min="1" value="99" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
+        </div>
+      </div>
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">색상</label>
+        <div class="flex items-center gap-3">
+          <input id="cat-color" type="color" value="#6366f1" class="w-10 h-10 rounded-lg border border-slate-200 cursor-pointer">
+          <div class="flex flex-wrap gap-1.5">
+            <button onclick="document.getElementById('cat-color').value='#6366f1'" class="w-6 h-6 rounded-full border-2 border-white shadow-sm" style="background:#6366f1"></button>
+            <button onclick="document.getElementById('cat-color').value='#0ea5e9'" class="w-6 h-6 rounded-full border-2 border-white shadow-sm" style="background:#0ea5e9"></button>
+            <button onclick="document.getElementById('cat-color').value='#10b981'" class="w-6 h-6 rounded-full border-2 border-white shadow-sm" style="background:#10b981"></button>
+            <button onclick="document.getElementById('cat-color').value='#f59e0b'" class="w-6 h-6 rounded-full border-2 border-white shadow-sm" style="background:#f59e0b"></button>
+            <button onclick="document.getElementById('cat-color').value='#ef4444'" class="w-6 h-6 rounded-full border-2 border-white shadow-sm" style="background:#ef4444"></button>
+            <button onclick="document.getElementById('cat-color').value='#8b5cf6'" class="w-6 h-6 rounded-full border-2 border-white shadow-sm" style="background:#8b5cf6"></button>
+            <button onclick="document.getElementById('cat-color').value='#ec4899'" class="w-6 h-6 rounded-full border-2 border-white shadow-sm" style="background:#ec4899"></button>
+            <button onclick="document.getElementById('cat-color').value='#14b8a6'" class="w-6 h-6 rounded-full border-2 border-white shadow-sm" style="background:#14b8a6"></button>
+          </div>
+        </div>
+      </div>
+    </div>
+    <input type="hidden" id="cat-edit-id">
+    <div class="flex gap-2 mt-5">
+      <button onclick="saveCategory()" class="flex-1 bg-purple-600 text-white py-2 rounded-lg text-sm hover:bg-purple-700 transition">저장</button>
+      <button onclick="closeModal('modal-category')" class="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg text-sm hover:bg-slate-200 transition">취소</button>
     </div>
   </div>
 </div>
@@ -1917,6 +2045,9 @@ async function deleteManager(id, name) {
 // 평가 항목 관리 페이지
 // ============================================================
 async function loadItemsPage() {
+  // 평가 영역 목록 렌더
+  renderCategoriesList()
+
   const filterSel = document.getElementById('items-position-filter')
   const posFilter = filterSel.value
   if (filterSel.options.length === 1) {
@@ -1971,7 +2102,7 @@ async function loadItemsPage() {
             <th class="text-left py-2 px-2">항목명</th>
             <th class="text-left py-2 px-2">평가 기준</th>
             <th class="text-center py-2 px-2 w-16">배점</th>
-            <th class="text-center py-2 px-2 w-24">적용 직책</th>
+            <th class="text-center py-2 px-2 w-40">적용 직책</th>
             <th class="text-center py-2 px-2 w-28">추가 시점</th>
             <th class="text-center py-2 px-2 w-20">작업</th>
           </tr>
@@ -1988,8 +2119,8 @@ async function loadItemsPage() {
               <td class="py-2.5 px-2 text-xs text-slate-500">\${item.criteria || ''}</td>
               <td class="py-2.5 px-2 text-center text-slate-600">\${item.max_score}</td>
               <td class="py-2.5 px-2 text-center">
-                \${item.position_name
-                  ? \`<span class="px-2 py-0.5 rounded-full text-xs" style="background:\${item.category_color}22;color:\${item.category_color}">\${item.position_name}</span>\`
+                \${(item.positions && item.positions.length > 0)
+                  ? item.positions.map(p => \`<span class="inline-block mx-0.5 px-1.5 py-0.5 rounded-full text-xs" style="background:\${p.color}22;color:\${p.color}">\${p.name}</span>\`).join('')
                   : '<span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500">공통</span>'}
               </td>
               <td class="py-2.5 px-2 text-center text-xs text-slate-400">\${fmtAdded(item.created_at)}</td>
@@ -1998,7 +2129,7 @@ async function loadItemsPage() {
                   <button onclick="showItemModal(\${item.id})" class="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-indigo-100 hover:text-indigo-600 transition">
                     <i class="fas fa-edit text-xs"></i>
                   </button>
-                  <button onclick="deleteItem(\${item.id}, '\${item.item_name.replace(/'/g, \"\\\\'\")}', '\${item.item_name.replace(/'/g, \"\\\\'\")}' )" class="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-red-100 hover:text-red-600 transition">
+                  <button onclick="deleteItem(\${item.id}, '\${item.item_name.replace(/'/g, \"\\\\'\")}' )" class="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-red-100 hover:text-red-600 transition">
                     <i class="fas fa-trash text-xs"></i>
                   </button>
                 </div>
@@ -2011,19 +2142,112 @@ async function loadItemsPage() {
   \`).join('')
 }
 
+// ============================================================
+// 평가 영역 목록 렌더
+// ============================================================
+function renderCategoriesList() {
+  const container = document.getElementById('categories-list')
+  if (!container) return
+  if (!state.categories || state.categories.length === 0) {
+    container.innerHTML = '<p class="text-xs text-slate-400 col-span-3">등록된 평가 영역이 없습니다.</p>'
+    return
+  }
+  container.innerHTML = state.categories.map(cat => \`
+    <div class="flex items-center justify-between p-3 rounded-xl border border-slate-100 bg-slate-50 hover:bg-white transition">
+      <div class="flex items-center gap-2 min-w-0">
+        <div class="w-3 h-3 rounded-full flex-shrink-0" style="background:\${cat.color}"></div>
+        <div class="min-w-0">
+          <p class="text-xs font-semibold text-slate-700 truncate">\${cat.name}</p>
+          <p class="text-xs text-slate-400">최대 \${cat.max_score}점 · 순서 \${cat.sort_order}</p>
+        </div>
+      </div>
+      <div class="flex gap-1 ml-2 flex-shrink-0">
+        <button onclick="showCategoryModal(\${cat.id})" class="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-indigo-100 hover:text-indigo-600 transition">
+          <i class="fas fa-edit text-xs"></i>
+        </button>
+        <button onclick="deleteCategory(\${cat.id}, '\${cat.name.replace(/'/g, \"\\\\'\")}' )" class="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-red-100 hover:text-red-600 transition">
+          <i class="fas fa-trash text-xs"></i>
+        </button>
+      </div>
+    </div>
+  \`).join('')
+}
+
+// ============================================================
+// 평가 영역 모달
+// ============================================================
+function showCategoryModal(id = null) {
+  state.editingCategoryId = id
+  document.getElementById('modal-category-title').textContent = id ? '평가 영역 수정' : '평가 영역 추가'
+  document.getElementById('cat-edit-id').value = id || ''
+  if (id) {
+    const cat = state.categories.find(c => c.id === id)
+    if (cat) {
+      document.getElementById('cat-name').value = cat.name
+      document.getElementById('cat-max-score').value = cat.max_score
+      document.getElementById('cat-sort').value = cat.sort_order
+      document.getElementById('cat-color').value = cat.color || '#6366f1'
+    }
+  } else {
+    document.getElementById('cat-name').value = ''
+    document.getElementById('cat-max-score').value = '20'
+    document.getElementById('cat-sort').value = '99'
+    document.getElementById('cat-color').value = '#6366f1'
+  }
+  document.getElementById('modal-category').classList.add('open')
+}
+
+async function saveCategory() {
+  const id = document.getElementById('cat-edit-id').value
+  const body = {
+    name: document.getElementById('cat-name').value.trim(),
+    max_score: parseInt(document.getElementById('cat-max-score').value) || 20,
+    sort_order: parseInt(document.getElementById('cat-sort').value) || 99,
+    color: document.getElementById('cat-color').value
+  }
+  if (!body.name) { showToast('영역명을 입력하세요', true); return }
+  if (id) {
+    await api('/categories/' + id, { method: 'PUT', body: JSON.stringify(body) })
+    showToast('영역 수정 완료 ✓')
+  } else {
+    await api('/categories', { method: 'POST', body: JSON.stringify(body) })
+    showToast('영역 추가 완료 ✓')
+  }
+  closeModal('modal-category')
+  // state.categories 갱신 후 재렌더
+  state.categories = await api('/categories') || state.categories
+  renderCategoriesList()
+}
+
+async function deleteCategory(id, name) {
+  if (!confirm(\`"\${name}" 영역을 삭제하시겠습니까?\n해당 영역에 활성 항목이 있으면 삭제되지 않습니다.\`)) return
+  const res = await api('/categories/' + id, { method: 'DELETE' })
+  if (res && res.error) { showToast(res.error, true); return }
+  showToast(\`"\${name}" 삭제 완료\`)
+  state.categories = await api('/categories') || state.categories
+  renderCategoriesList()
+}
+
 function showItemModal(id = null) {
   state.editingItemId = id
   document.getElementById('modal-item-title').textContent = id ? '항목 수정' : '항목 추가'
   document.getElementById('item-edit-id').value = id || ''
 
+  // 평가 영역 셀렉트 갱신
   const catSel = document.getElementById('item-category')
   catSel.innerHTML = state.categories.map(c => \`<option value="\${c.id}">\${c.name}</option>\`).join('')
 
-  const posSel = document.getElementById('item-position')
-  posSel.innerHTML = '<option value="">공통 (전체 직책)</option>' +
-    state.positions.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')
+  // 직책 체크박스 렌더
+  const checksContainer = document.getElementById('item-positions-checks')
+  checksContainer.innerHTML = state.positions.map(p => \`
+    <label class="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white cursor-pointer hover:border-indigo-300 transition text-xs select-none pos-check-label" data-id="\${p.id}">
+      <input type="checkbox" class="item-pos-check" value="\${p.id}">
+      <span class="w-2 h-2 rounded-full inline-block" style="background:\${p.color}"></span>
+      <span>\${p.name}</span>
+    </label>
+  \`).join('')
 
-  // 사유 필드 초기화
+  // 사유 초기화
   document.getElementById('item-reason').value = ''
 
   if (id) {
@@ -2031,11 +2255,17 @@ function showItemModal(id = null) {
       const item = (items || []).find(i => i.id === id)
       if (item) {
         catSel.value = item.category_id
-        posSel.value = item.position_id || ''
         document.getElementById('item-name').value = item.item_name
         document.getElementById('item-criteria').value = item.criteria || ''
         document.getElementById('item-max-score').value = item.max_score
         document.getElementById('item-sort').value = item.sort_order
+        // 현재 직책 체크박스 복원
+        const checkedIds = (item.positions || []).map(p => String(p.id))
+        document.querySelectorAll('.item-pos-check').forEach(cb => {
+          cb.checked = checkedIds.includes(cb.value)
+          cb.closest('label').classList.toggle('border-indigo-400', cb.checked)
+          cb.closest('label').classList.toggle('bg-indigo-50', cb.checked)
+        })
       }
     })
   } else {
@@ -2044,15 +2274,28 @@ function showItemModal(id = null) {
     document.getElementById('item-max-score').value = '5'
     document.getElementById('item-sort').value = '99'
   }
+
+  // 체크박스 클릭 시 시각적 강조
+  document.querySelectorAll('.item-pos-check').forEach(cb => {
+    cb.addEventListener('change', function() {
+      this.closest('label').classList.toggle('border-indigo-400', this.checked)
+      this.closest('label').classList.toggle('bg-indigo-50', this.checked)
+    })
+  })
+
   document.getElementById('modal-item').classList.add('open')
 }
 
 async function saveItem() {
   const id = document.getElementById('item-edit-id').value
   const reason = document.getElementById('item-reason').value.trim() || null
+
+  // 체크된 직책 ids 수집
+  const positionIds = Array.from(document.querySelectorAll('.item-pos-check:checked')).map(cb => parseInt(cb.value))
+
   const body = {
     category_id: document.getElementById('item-category').value,
-    position_id: document.getElementById('item-position').value || null,
+    position_ids: positionIds,
     item_name: document.getElementById('item-name').value.trim(),
     criteria: document.getElementById('item-criteria').value,
     max_score: parseInt(document.getElementById('item-max-score').value) || 5,
