@@ -71,7 +71,7 @@
 | `managers` | id, name, position_id, is_active, created_at | 관리자 7명 (인원·보직 유동적) |
 | `eval_categories` | id, name, max_score, sort_order, color, created_at | 평가 영역 5개 |
 | `eval_items` | id, category_id, position_id(nullable), item_name, criteria, max_score, sort_order, is_active, created_at | 평가 항목 27개 (공통+직책전용) |
-| `eval_periods` | id, year, month, label, is_active, created_at | 평가 기간 (현재: 2026년 6월) |
+| `eval_periods` | id, year, month, label, is_active, **is_confirmed**, created_at | 평가 기간 (현재: 2026년 6월 반영완료, 2026년 7월 임시) |
 | `eval_results` | id, manager_id, period_id, item_id, score, note, created_at, updated_at | 평가 결과 (UNIQUE 제약) |
 
 ---
@@ -96,11 +96,12 @@
 | POST | `/api/items` | 평가 항목 추가 |
 | PUT | `/api/items/:id` | 평가 항목 수정 |
 | DELETE | `/api/items/:id` | 평가 항목 삭제 (is_active=0) |
-| GET | `/api/periods` | 평가 기간 목록 |
+| GET | `/api/periods` | 평가 기간 목록 (is_confirmed 포함) |
 | POST | `/api/periods` | 평가 기간 추가 |
+| PUT | `/api/periods/:id/confirm` | 반영완료 토글 (is_confirmed 0↔1) |
 | GET | `/api/results` | 평가 결과 조회 (manager_id, period_id 필터) |
 | POST | `/api/results/batch` | 평가 결과 일괄 저장 (INSERT OR REPLACE) |
-| GET | `/api/dashboard` | 대시보드 집계 데이터 (summary + categories + positions) |
+| GET | `/api/dashboard` | 대시보드 집계 데이터 — period_id 미지정 시 is_confirmed=1 최신 기간 자동 선택, **periodId** 응답 포함 |
 
 ---
 
@@ -256,10 +257,10 @@ dist/_worker.js  (약 150~160 kB)
 
 | 항목 | 내용 |
 |------|------|
-| 최근 빌드 | 성공 (dist/_worker.js ~152 kB, 빌드 약 524ms) |
+| 최근 빌드 | 성공 (dist/_worker.js ~157 kB, 빌드 약 662ms) |
 | 서버 상태 | PM2 webapp (id:0) online, port 3000 |
 | Git 브랜치 | `main` |
-| 최근 커밋 | `3fb1b8a` — "refactor: 사이드바 가독성 개선 + 색상 설정 별도 페이지(/colors) 분리" |
+| 최근 커밋 | `78d7a1a` — "feat: 평가 기간 반영완료 기능 추가 + 대시보드 기본 기간 자동 선택" |
 | 미완료 작업 | 없음 |
 
 ---
