@@ -1917,11 +1917,11 @@ async function deleteManager(id, name) {
 // 평가 항목 관리 페이지
 // ============================================================
 async function loadItemsPage() {
-  const posFilter = (document.getElementById('items-position-filter') as HTMLSelectElement).value
   const filterSel = document.getElementById('items-position-filter')
+  const posFilter = filterSel.value
   if (filterSel.options.length === 1) {
     filterSel.innerHTML = '<option value="">전체</option>' +
-      state.positions.map((p: any) => \`<option value="\${p.id}">\${p.name}</option>\`).join('')
+      state.positions.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')
   }
 
   const url = posFilter ? '/items?position_id=' + posFilter : '/items'
@@ -1929,11 +1929,11 @@ async function loadItemsPage() {
   if (!items) return
 
   // 현재 선택 기간의 (year, month) — NEW 배지 기준
-  const curPeriod = state.periods.find((p: any) => p.id == state.currentPeriodId)
+  const curPeriod = state.periods.find(p => p.id == state.currentPeriodId)
   const periodYM = curPeriod ? curPeriod.year * 100 + curPeriod.month : null
 
   // 추가시점 포맷 함수: "2026-07-13 ..." → "2026년 7월"
-  function fmtAdded(dateStr: string) {
+  function fmtAdded(dateStr) {
     if (!dateStr) return '-'
     const m = dateStr.match(/^(\d{4})-(\d{2})/)
     if (!m) return '-'
@@ -1941,7 +1941,7 @@ async function loadItemsPage() {
   }
 
   // NEW 배지 여부: 항목 추가 월 >= 현재 선택 기간 월
-  function isNew(dateStr: string) {
+  function isNew(dateStr) {
     if (!periodYM || !dateStr) return false
     const m = dateStr.match(/^(\d{4})-(\d{2})/)
     if (!m) return false
@@ -1950,15 +1950,15 @@ async function loadItemsPage() {
   }
 
   // 카테고리별 그룹핑
-  const byCategory: any = {}
-  items.forEach((item: any) => {
+  const byCategory = {}
+  items.forEach(item => {
     if (!byCategory[item.category_id]) byCategory[item.category_id] = {
       name: item.category_name, color: item.category_color, items: []
     }
     byCategory[item.category_id].items.push(item)
   })
 
-  document.getElementById('items-list').innerHTML = Object.entries(byCategory).map(([catId, cat]: any) => \`
+  document.getElementById('items-list').innerHTML = Object.entries(byCategory).map(([catId, cat]) => \`
     <div class="card p-5 mb-4">
       <div class="flex items-center gap-2 mb-3">
         <div class="w-3 h-3 rounded-full" style="background:\${cat.color}"></div>
@@ -1977,7 +1977,7 @@ async function loadItemsPage() {
           </tr>
         </thead>
         <tbody>
-          \${cat.items.map((item: any) => \`
+          \${cat.items.map(item => \`
             <tr class="border-b border-slate-50 hover:bg-slate-50">
               <td class="py-2.5 px-2 font-medium text-slate-700">
                 \${item.item_name}
@@ -2024,39 +2024,39 @@ function showItemModal(id = null) {
     state.positions.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')
 
   // 사유 필드 초기화
-  ;(document.getElementById('item-reason') as HTMLInputElement).value = ''
+  document.getElementById('item-reason').value = ''
 
   if (id) {
     api('/items').then(items => {
-      const item = (items || []).find((i: any) => i.id === id)
+      const item = (items || []).find(i => i.id === id)
       if (item) {
         catSel.value = item.category_id
         posSel.value = item.position_id || ''
-        ;(document.getElementById('item-name') as HTMLInputElement).value = item.item_name
-        ;(document.getElementById('item-criteria') as HTMLTextAreaElement).value = item.criteria || ''
-        ;(document.getElementById('item-max-score') as HTMLInputElement).value = item.max_score
-        ;(document.getElementById('item-sort') as HTMLInputElement).value = item.sort_order
+        document.getElementById('item-name').value = item.item_name
+        document.getElementById('item-criteria').value = item.criteria || ''
+        document.getElementById('item-max-score').value = item.max_score
+        document.getElementById('item-sort').value = item.sort_order
       }
     })
   } else {
-    ;(document.getElementById('item-name') as HTMLInputElement).value = ''
-    ;(document.getElementById('item-criteria') as HTMLTextAreaElement).value = ''
-    ;(document.getElementById('item-max-score') as HTMLInputElement).value = '5'
-    ;(document.getElementById('item-sort') as HTMLInputElement).value = '99'
+    document.getElementById('item-name').value = ''
+    document.getElementById('item-criteria').value = ''
+    document.getElementById('item-max-score').value = '5'
+    document.getElementById('item-sort').value = '99'
   }
   document.getElementById('modal-item').classList.add('open')
 }
 
 async function saveItem() {
   const id = document.getElementById('item-edit-id').value
-  const reason = (document.getElementById('item-reason') as HTMLInputElement).value.trim() || null
-  const body: any = {
+  const reason = document.getElementById('item-reason').value.trim() || null
+  const body = {
     category_id: document.getElementById('item-category').value,
-    position_id: (document.getElementById('item-position') as HTMLSelectElement).value || null,
-    item_name: (document.getElementById('item-name') as HTMLInputElement).value.trim(),
-    criteria: (document.getElementById('item-criteria') as HTMLTextAreaElement).value,
-    max_score: parseInt((document.getElementById('item-max-score') as HTMLInputElement).value) || 5,
-    sort_order: parseInt((document.getElementById('item-sort') as HTMLInputElement).value) || 99,
+    position_id: document.getElementById('item-position').value || null,
+    item_name: document.getElementById('item-name').value.trim(),
+    criteria: document.getElementById('item-criteria').value,
+    max_score: parseInt(document.getElementById('item-max-score').value) || 5,
+    sort_order: parseInt(document.getElementById('item-sort').value) || 99,
     is_active: 1,
     reason
   }
@@ -2098,14 +2098,14 @@ async function showHistoryModal() {
     return
   }
 
-  const actionLabel: any = { add: '추가', edit: '수정', delete: '삭제' }
-  const actionCls: any = {
+  const actionLabel = { add: '추가', edit: '수정', delete: '삭제' }
+  const actionCls = {
     add: 'bg-emerald-100 text-emerald-700',
     edit: 'bg-blue-100 text-blue-700',
     delete: 'bg-red-100 text-red-700'
   }
 
-  function fmtDate(d: string) {
+  function fmtDate(d) {
     if (!d) return '-'
     const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
     return m ? \`\${m[1]}년 \${parseInt(m[2])}월 \${parseInt(m[3])}일\` : d.slice(0, 10)
@@ -2125,7 +2125,7 @@ async function showHistoryModal() {
         </tr>
       </thead>
       <tbody>
-        \${data.map((h: any) => \`
+        \${data.map(h => \`
           <tr class="border-b border-slate-50 hover:bg-slate-50">
             <td class="py-2.5 px-3 text-center">
               <span class="text-xs font-semibold px-2 py-0.5 rounded-full \${actionCls[h.action] || 'bg-slate-100 text-slate-600'}">
@@ -2177,7 +2177,7 @@ async function showScoreCheckModal() {
 
     <!-- 직책별 -->
     <div class="space-y-3">
-      \${rows.map((r: any) => {
+      \${rows.map(r => {
         const total = r.total_score || 0
         const over = total > 100
         const warn = total === 100
