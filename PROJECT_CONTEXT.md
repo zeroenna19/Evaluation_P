@@ -273,3 +273,62 @@ dist/_worker.js  (약 150~160 kB)
 4. 정적 파일은 반드시 `hono/cloudflare-workers`의 `serveStatic` 사용
 5. D1 로컬 개발은 `--local` 플래그 필수 (`.wrangler/state/v3/d1`에 SQLite 생성)
 6. 테마 색상은 localStorage만 저장, 직책·영역 색상은 DB에도 저장
+
+---
+
+## 14. ⚠️ 인라인 `<script>` 내 TypeScript 문법 절대 금지
+
+### 배경
+`src/index.tsx`는 **서버 코드(Hono 라우트)**와 **클라이언트 코드(인라인 HTML 문자열 안의 `<script>`)** 가 공존한다.  
+Vite 빌드는 **서버 코드만 TypeScript → JavaScript로 컴파일**하며,  
+HTML 문자열 안의 `<script>` 내용은 **그대로 브라우저로 전달**된다.  
+따라서 `<script>` 태그 안에 TypeScript 문법이 들어가면 브라우저에서 **SyntaxError → 전체 JS 실행 중단 → 데이터 미표시** 현상이 발생한다.
+
+### 금지 패턴 (브라우저에서 SyntaxError 유발)
+
+```typescript
+// ❌ 타입 캐스팅
+(document.getElementById('foo') as HTMLInputElement).value
+(document.getElementById('bar') as HTMLSelectElement).value
+
+// ❌ 타입 어노테이션
+const body: any = { ... }
+items.forEach((item: any) => { ... })
+state.periods.find((p: any) => p.id === id)
+function fmtDate(d: string) { ... }
+const byCategory: any = {}
+const actionLabel: any = { ... }
+```
+
+### 올바른 패턴 (순수 JavaScript)
+
+```javascript
+// ✅ 타입 캐스팅 → 그냥 접근
+document.getElementById('foo').value
+document.getElementById('bar').value
+
+// ✅ 타입 어노테이션 → 제거
+const body = { ... }
+items.forEach(item => { ... })
+state.periods.find(p => p.id === id)
+function fmtDate(d) { ... }
+const byCategory = {}
+const actionLabel = { ... }
+```
+
+### 적용 범위
+
+| 위치 | TypeScript 문법 사용 가능 여부 |
+|------|-------------------------------|
+| Hono 라우트 코드 (`app.get(...)`, `app.post(...)` 등) | ✅ 가능 (Vite가 컴파일) |
+| `getIndexHtml()` 함수 자체의 반환 타입 `: string` | ✅ 가능 (함수 선언부) |
+| **`getIndexHtml()` 안에서 반환하는 HTML 문자열 내 `<script>` 태그** | ❌ **절대 불가** |
+| **`getColorsHtml()` 안에서 반환하는 HTML 문자열 내 `<script>` 태그** | ❌ **절대 불가** |
+
+### 확인 방법
+코드 작성 후 아래 명령으로 인라인 script 영역에 TypeScript 문법이 없는지 검증:
+```bash
+# getIndexHtml 함수 범위(418번 줄 이후) 내 TypeScript 문법 검색
+grep -n " as HTML\|: any\b\|: string\b\|: number\b" src/index.tsx | awk -F: '$2 > 418'
+# 결과가 없어야 정상 (서버 코드 범위 밖에는 TypeScript 문법 0건이어야 함)
+```
