@@ -131,26 +131,107 @@ app.get('/api/items', async (c) => {
   return c.json(results)
 })
 
+// 변경이력 조회
+app.get('/api/items/history', async (c) => {
+  const { results } = await c.env.DB.prepare(`
+    SELECT ih.*
+    FROM item_history ih
+    ORDER BY ih.changed_at DESC
+    LIMIT 200
+  `).all()
+  return c.json(results)
+})
+
+// 직책별 배점 합산 확인
+app.get('/api/items/score-check', async (c) => {
+  // 1. 직책별 전용 항목 합산
+  const { results: byPos } = await c.env.DB.prepare(`
+    SELECT p.id as position_id, p.name as position_name, p.color,
+           SUM(ei.max_score) as dedicated_score
+    FROM positions p
+    LEFT JOIN eval_items ei ON ei.position_id = p.id AND ei.is_active = 1
+    GROUP BY p.id
+    ORDER BY p.id
+  `).all()
+  // 2. 공통 항목 합산
+  const common: any = await c.env.DB.prepare(`
+    SELECT SUM(max_score) as common_score FROM eval_items
+    WHERE position_id IS NULL AND is_active = 1
+  `).first()
+  const commonScore = common?.common_score || 0
+  // 3. 직책별 총점 = 공통 + 전용
+  const rows = (byPos as any[]).map(p => ({
+    ...p,
+    common_score: commonScore,
+    total_score: commonScore + (p.dedicated_score || 0)
+  }))
+  return c.json({ rows, common_score: commonScore })
+})
+
 app.post('/api/items', async (c) => {
-  const { category_id, position_id, item_name, criteria, max_score, sort_order } = await c.req.json()
+  const { category_id, position_id, item_name, criteria, max_score, sort_order, reason } = await c.req.json()
   const r = await c.env.DB.prepare(
     'INSERT INTO eval_items (category_id, position_id, item_name, criteria, max_score, sort_order) VALUES (?,?,?,?,?,?)'
   ).bind(category_id, position_id || null, item_name, criteria || '', max_score || 5, sort_order || 99).run()
-  return c.json({ id: r.meta.last_row_id })
+  const newId = r.meta.last_row_id
+
+  // 이력 기록 — 영역명·직책명 조회 후 스냅샷 저장
+  const snap: any = await c.env.DB.prepare(`
+    SELECT ec.name as category_name, p.name as position_name, ei.max_score
+    FROM eval_items ei
+    LEFT JOIN eval_categories ec ON ei.category_id = ec.id
+    LEFT JOIN positions p ON ei.position_id = p.id
+    WHERE ei.id = ?
+  `).bind(newId).first()
+  await c.env.DB.prepare(
+    'INSERT INTO item_history (item_id, action, item_name, category_name, position_name, max_score, reason) VALUES (?,?,?,?,?,?,?)'
+  ).bind(newId, 'add', item_name, snap?.category_name || '', snap?.position_name || null, snap?.max_score || max_score, reason || null).run()
+
+  return c.json({ id: newId })
 })
 
 app.put('/api/items/:id', async (c) => {
   const id = c.req.param('id')
-  const { category_id, position_id, item_name, criteria, max_score, sort_order, is_active } = await c.req.json()
+  const { category_id, position_id, item_name, criteria, max_score, sort_order, is_active, reason } = await c.req.json()
   await c.env.DB.prepare(
     'UPDATE eval_items SET category_id=?, position_id=?, item_name=?, criteria=?, max_score=?, sort_order=?, is_active=? WHERE id=?'
   ).bind(category_id, position_id || null, item_name, criteria, max_score, sort_order, is_active ?? 1, id).run()
+
+  // 이력 기록
+  const snap: any = await c.env.DB.prepare(`
+    SELECT ec.name as category_name, p.name as position_name, ei.max_score
+    FROM eval_items ei
+    LEFT JOIN eval_categories ec ON ei.category_id = ec.id
+    LEFT JOIN positions p ON ei.position_id = p.id
+    WHERE ei.id = ?
+  `).bind(id).first()
+  await c.env.DB.prepare(
+    'INSERT INTO item_history (item_id, action, item_name, category_name, position_name, max_score, reason) VALUES (?,?,?,?,?,?,?)'
+  ).bind(Number(id), 'edit', item_name, snap?.category_name || '', snap?.position_name || null, snap?.max_score || max_score, reason || null).run()
+
   return c.json({ ok: true })
 })
 
 app.delete('/api/items/:id', async (c) => {
   const id = c.req.param('id')
+  const { reason } = await c.req.json().catch(() => ({ reason: null }))
+
+  // 삭제 전 스냅샷 저장
+  const snap: any = await c.env.DB.prepare(`
+    SELECT ei.item_name, ec.name as category_name, p.name as position_name, ei.max_score
+    FROM eval_items ei
+    LEFT JOIN eval_categories ec ON ei.category_id = ec.id
+    LEFT JOIN positions p ON ei.position_id = p.id
+    WHERE ei.id = ?
+  `).bind(id).first()
+
   await c.env.DB.prepare('UPDATE eval_items SET is_active=0 WHERE id=?').bind(id).run()
+
+  if (snap) {
+    await c.env.DB.prepare(
+      'INSERT INTO item_history (item_id, action, item_name, category_name, position_name, max_score, reason) VALUES (?,?,?,?,?,?,?)'
+    ).bind(Number(id), 'delete', snap.item_name, snap.category_name || '', snap.position_name || null, snap.max_score, reason || null).run()
+  }
   return c.json({ ok: true })
 })
 
@@ -618,9 +699,17 @@ function getIndexHtml(): string {
             <option value="">전체</option>
           </select>
         </div>
-        <button onclick="showItemModal()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm transition">
-          <i class="fas fa-plus mr-2"></i>항목 추가
-        </button>
+        <div class="flex gap-2">
+          <button onclick="showHistoryModal()" class="flex items-center gap-1.5 border border-slate-300 text-slate-600 px-3 py-2 rounded-lg hover:bg-slate-50 text-sm transition">
+            <i class="fas fa-history text-slate-400"></i>변경이력
+          </button>
+          <button onclick="showScoreCheckModal()" class="flex items-center gap-1.5 border border-amber-300 text-amber-700 px-3 py-2 rounded-lg hover:bg-amber-50 text-sm transition">
+            <i class="fas fa-calculator text-amber-400"></i>배점확인
+          </button>
+          <button onclick="showItemModal()" class="bg-indigo-600 text-white px-4 py-2 rounded-lg hover:bg-indigo-700 text-sm transition">
+            <i class="fas fa-plus mr-2"></i>항목 추가
+          </button>
+        </div>
       </div>
       <div id="items-list"></div>
     </div>
@@ -819,11 +908,55 @@ function getIndexHtml(): string {
           <input id="item-sort" type="number" min="1" value="99" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-400">
         </div>
       </div>
+      <div>
+        <label class="text-xs text-slate-500 mb-1 block">변경 사유 <span class="text-slate-400">(선택)</span></label>
+        <input id="item-reason" type="text" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-indigo-400" placeholder="예: 업무 범위 확대로 항목 추가">
+      </div>
     </div>
     <input type="hidden" id="item-edit-id">
     <div class="flex gap-2 mt-5">
       <button onclick="saveItem()" class="flex-1 bg-indigo-600 text-white py-2 rounded-lg text-sm hover:bg-indigo-700 transition">저장</button>
       <button onclick="closeModal('modal-item')" class="flex-1 bg-slate-100 text-slate-600 py-2 rounded-lg text-sm hover:bg-slate-200 transition">취소</button>
+    </div>
+  </div>
+</div>
+
+<!-- 변경이력 모달 -->
+<div id="modal-history" class="modal">
+  <div class="bg-white rounded-xl w-[780px] max-h-[85vh] flex flex-col mx-4">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+      <div>
+        <h3 class="text-base font-bold text-slate-800">평가 항목 변경이력</h3>
+        <p class="text-xs text-slate-400 mt-0.5">추가·수정·삭제된 항목의 전체 이력</p>
+      </div>
+      <button onclick="closeModal('modal-history')" class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="overflow-y-auto flex-1 p-6">
+      <div id="history-content">
+        <div class="text-center text-slate-400 py-8"><i class="fas fa-spinner fa-spin"></i></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 배점확인 모달 -->
+<div id="modal-score-check" class="modal">
+  <div class="bg-white rounded-xl w-[640px] max-h-[85vh] flex flex-col mx-4">
+    <div class="flex items-center justify-between px-6 py-4 border-b border-slate-100">
+      <div>
+        <h3 class="text-base font-bold text-slate-800">배점 확인</h3>
+        <p class="text-xs text-slate-400 mt-0.5">직책별 현재 활성 항목의 총 배점 현황</p>
+      </div>
+      <button onclick="closeModal('modal-score-check')" class="w-8 h-8 rounded-lg hover:bg-slate-100 flex items-center justify-center text-slate-400">
+        <i class="fas fa-times"></i>
+      </button>
+    </div>
+    <div class="overflow-y-auto flex-1 p-6">
+      <div id="score-check-content">
+        <div class="text-center text-slate-400 py-8"><i class="fas fa-spinner fa-spin"></i></div>
+      </div>
     </div>
   </div>
 </div>
@@ -1784,27 +1917,48 @@ async function deleteManager(id, name) {
 // 평가 항목 관리 페이지
 // ============================================================
 async function loadItemsPage() {
-  const posFilter = document.getElementById('items-position-filter').value
+  const posFilter = (document.getElementById('items-position-filter') as HTMLSelectElement).value
   const filterSel = document.getElementById('items-position-filter')
   if (filterSel.options.length === 1) {
     filterSel.innerHTML = '<option value="">전체</option>' +
-      state.positions.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')
+      state.positions.map((p: any) => \`<option value="\${p.id}">\${p.name}</option>\`).join('')
   }
-  
+
   const url = posFilter ? '/items?position_id=' + posFilter : '/items'
   const items = await api(url)
   if (!items) return
-  
+
+  // 현재 선택 기간의 (year, month) — NEW 배지 기준
+  const curPeriod = state.periods.find((p: any) => p.id == state.currentPeriodId)
+  const periodYM = curPeriod ? curPeriod.year * 100 + curPeriod.month : null
+
+  // 추가시점 포맷 함수: "2026-07-13 ..." → "2026년 7월"
+  function fmtAdded(dateStr: string) {
+    if (!dateStr) return '-'
+    const m = dateStr.match(/^(\d{4})-(\d{2})/)
+    if (!m) return '-'
+    return \`\${m[1]}년 \${parseInt(m[2])}월\`
+  }
+
+  // NEW 배지 여부: 항목 추가 월 >= 현재 선택 기간 월
+  function isNew(dateStr: string) {
+    if (!periodYM || !dateStr) return false
+    const m = dateStr.match(/^(\d{4})-(\d{2})/)
+    if (!m) return false
+    const itemYM = parseInt(m[1]) * 100 + parseInt(m[2])
+    return itemYM >= periodYM
+  }
+
   // 카테고리별 그룹핑
-  const byCategory = {}
-  items.forEach(item => {
+  const byCategory: any = {}
+  items.forEach((item: any) => {
     if (!byCategory[item.category_id]) byCategory[item.category_id] = {
       name: item.category_name, color: item.category_color, items: []
     }
     byCategory[item.category_id].items.push(item)
   })
-  
-  document.getElementById('items-list').innerHTML = Object.entries(byCategory).map(([catId, cat]) => \`
+
+  document.getElementById('items-list').innerHTML = Object.entries(byCategory).map(([catId, cat]: any) => \`
     <div class="card p-5 mb-4">
       <div class="flex items-center gap-2 mb-3">
         <div class="w-3 h-3 rounded-full" style="background:\${cat.color}"></div>
@@ -1818,13 +1972,19 @@ async function loadItemsPage() {
             <th class="text-left py-2 px-2">평가 기준</th>
             <th class="text-center py-2 px-2 w-16">배점</th>
             <th class="text-center py-2 px-2 w-24">적용 직책</th>
+            <th class="text-center py-2 px-2 w-28">추가 시점</th>
             <th class="text-center py-2 px-2 w-20">작업</th>
           </tr>
         </thead>
         <tbody>
-          \${cat.items.map(item => \`
+          \${cat.items.map((item: any) => \`
             <tr class="border-b border-slate-50 hover:bg-slate-50">
-              <td class="py-2.5 px-2 font-medium text-slate-700">\${item.item_name}</td>
+              <td class="py-2.5 px-2 font-medium text-slate-700">
+                \${item.item_name}
+                \${isNew(item.created_at)
+                  ? '<span class="ml-1.5 text-xs font-bold px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700">NEW</span>'
+                  : ''}
+              </td>
               <td class="py-2.5 px-2 text-xs text-slate-500">\${item.criteria || ''}</td>
               <td class="py-2.5 px-2 text-center text-slate-600">\${item.max_score}</td>
               <td class="py-2.5 px-2 text-center">
@@ -1832,12 +1992,13 @@ async function loadItemsPage() {
                   ? \`<span class="px-2 py-0.5 rounded-full text-xs" style="background:\${item.category_color}22;color:\${item.category_color}">\${item.position_name}</span>\`
                   : '<span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500">공통</span>'}
               </td>
+              <td class="py-2.5 px-2 text-center text-xs text-slate-400">\${fmtAdded(item.created_at)}</td>
               <td class="py-2.5 px-2 text-center">
                 <div class="flex gap-1 justify-center">
                   <button onclick="showItemModal(\${item.id})" class="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-indigo-100 hover:text-indigo-600 transition">
                     <i class="fas fa-edit text-xs"></i>
                   </button>
-                  <button onclick="deleteItem(\${item.id}, '\${item.item_name}')" class="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-red-100 hover:text-red-600 transition">
+                  <button onclick="deleteItem(\${item.id}, '\${item.item_name.replace(/'/g, \"\\\\'\")}', '\${item.item_name.replace(/'/g, \"\\\\'\")}' )" class="w-7 h-7 rounded flex items-center justify-center text-slate-400 hover:bg-red-100 hover:text-red-600 transition">
                     <i class="fas fa-trash text-xs"></i>
                   </button>
                 </div>
@@ -1854,49 +2015,53 @@ function showItemModal(id = null) {
   state.editingItemId = id
   document.getElementById('modal-item-title').textContent = id ? '항목 수정' : '항목 추가'
   document.getElementById('item-edit-id').value = id || ''
-  
+
   const catSel = document.getElementById('item-category')
   catSel.innerHTML = state.categories.map(c => \`<option value="\${c.id}">\${c.name}</option>\`).join('')
-  
+
   const posSel = document.getElementById('item-position')
   posSel.innerHTML = '<option value="">공통 (전체 직책)</option>' +
     state.positions.map(p => \`<option value="\${p.id}">\${p.name}</option>\`).join('')
-  
+
+  // 사유 필드 초기화
+  ;(document.getElementById('item-reason') as HTMLInputElement).value = ''
+
   if (id) {
-    // 해당 항목 데이터 로드 필요 - 현재는 페이지 아이템에서 가져옴
     api('/items').then(items => {
-      const item = (items || []).find(i => i.id === id)
+      const item = (items || []).find((i: any) => i.id === id)
       if (item) {
         catSel.value = item.category_id
         posSel.value = item.position_id || ''
-        document.getElementById('item-name').value = item.item_name
-        document.getElementById('item-criteria').value = item.criteria || ''
-        document.getElementById('item-max-score').value = item.max_score
-        document.getElementById('item-sort').value = item.sort_order
+        ;(document.getElementById('item-name') as HTMLInputElement).value = item.item_name
+        ;(document.getElementById('item-criteria') as HTMLTextAreaElement).value = item.criteria || ''
+        ;(document.getElementById('item-max-score') as HTMLInputElement).value = item.max_score
+        ;(document.getElementById('item-sort') as HTMLInputElement).value = item.sort_order
       }
     })
   } else {
-    document.getElementById('item-name').value = ''
-    document.getElementById('item-criteria').value = ''
-    document.getElementById('item-max-score').value = 5
-    document.getElementById('item-sort').value = 99
+    ;(document.getElementById('item-name') as HTMLInputElement).value = ''
+    ;(document.getElementById('item-criteria') as HTMLTextAreaElement).value = ''
+    ;(document.getElementById('item-max-score') as HTMLInputElement).value = '5'
+    ;(document.getElementById('item-sort') as HTMLInputElement).value = '99'
   }
   document.getElementById('modal-item').classList.add('open')
 }
 
 async function saveItem() {
   const id = document.getElementById('item-edit-id').value
-  const body = {
+  const reason = (document.getElementById('item-reason') as HTMLInputElement).value.trim() || null
+  const body: any = {
     category_id: document.getElementById('item-category').value,
-    position_id: document.getElementById('item-position').value || null,
-    item_name: document.getElementById('item-name').value.trim(),
-    criteria: document.getElementById('item-criteria').value,
-    max_score: parseInt(document.getElementById('item-max-score').value) || 5,
-    sort_order: parseInt(document.getElementById('item-sort').value) || 99,
-    is_active: 1
+    position_id: (document.getElementById('item-position') as HTMLSelectElement).value || null,
+    item_name: (document.getElementById('item-name') as HTMLInputElement).value.trim(),
+    criteria: (document.getElementById('item-criteria') as HTMLTextAreaElement).value,
+    max_score: parseInt((document.getElementById('item-max-score') as HTMLInputElement).value) || 5,
+    sort_order: parseInt((document.getElementById('item-sort') as HTMLInputElement).value) || 99,
+    is_active: 1,
+    reason
   }
   if (!body.item_name) { showToast('항목명을 입력하세요', true); return }
-  
+
   if (id) {
     await api('/items/' + id, { method: 'PUT', body: JSON.stringify(body) })
     showToast('항목 수정 완료 ✓')
@@ -1910,9 +2075,138 @@ async function saveItem() {
 
 async function deleteItem(id, name) {
   if (!confirm(\`"\${name}" 항목을 삭제하시겠습니까?\`)) return
-  await api('/items/' + id, { method: 'DELETE' })
-  showToast('삭제 완료')
+  const reason = prompt(\`삭제 사유를 입력해 주세요. (선택사항)\n항목: \${name}\`) ?? ''
+  await api('/items/' + id, {
+    method: 'DELETE',
+    body: JSON.stringify({ reason: reason.trim() || null })
+  })
+  showToast(\`"\${name}" 삭제 완료\`)
   loadItemsPage()
+}
+
+// ============================================================
+// 변경이력 모달
+// ============================================================
+async function showHistoryModal() {
+  document.getElementById('modal-history').classList.add('open')
+  const container = document.getElementById('history-content')
+  container.innerHTML = '<div class="text-center text-slate-400 py-8"><i class="fas fa-spinner fa-spin mr-2"></i>불러오는 중...</div>'
+
+  const data = await api('/items/history')
+  if (!data || data.length === 0) {
+    container.innerHTML = '<div class="text-center text-slate-400 py-10"><i class="fas fa-inbox text-2xl mb-2 block"></i>변경이력이 없습니다.</div>'
+    return
+  }
+
+  const actionLabel: any = { add: '추가', edit: '수정', delete: '삭제' }
+  const actionCls: any = {
+    add: 'bg-emerald-100 text-emerald-700',
+    edit: 'bg-blue-100 text-blue-700',
+    delete: 'bg-red-100 text-red-700'
+  }
+
+  function fmtDate(d: string) {
+    if (!d) return '-'
+    const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    return m ? \`\${m[1]}년 \${parseInt(m[2])}월 \${parseInt(m[3])}일\` : d.slice(0, 10)
+  }
+
+  container.innerHTML = \`
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="border-b border-slate-200 text-xs text-slate-500">
+          <th class="text-center py-2.5 px-3 w-16">구분</th>
+          <th class="text-left py-2.5 px-3">항목명</th>
+          <th class="text-left py-2.5 px-3 w-32">평가 영역</th>
+          <th class="text-center py-2.5 px-3 w-24">직책</th>
+          <th class="text-center py-2.5 px-3 w-14">배점</th>
+          <th class="text-left py-2.5 px-3">사유</th>
+          <th class="text-right py-2.5 px-3 w-28">변경일</th>
+        </tr>
+      </thead>
+      <tbody>
+        \${data.map((h: any) => \`
+          <tr class="border-b border-slate-50 hover:bg-slate-50">
+            <td class="py-2.5 px-3 text-center">
+              <span class="text-xs font-semibold px-2 py-0.5 rounded-full \${actionCls[h.action] || 'bg-slate-100 text-slate-600'}">
+                \${actionLabel[h.action] || h.action}
+              </span>
+            </td>
+            <td class="py-2.5 px-3 font-medium text-slate-700">\${h.item_name}</td>
+            <td class="py-2.5 px-3 text-xs text-slate-500">\${h.category_name || '-'}</td>
+            <td class="py-2.5 px-3 text-center text-xs">
+              \${h.position_name
+                ? \`<span class="px-1.5 py-0.5 rounded bg-slate-100 text-slate-600">\${h.position_name}</span>\`
+                : '<span class="text-slate-300">공통</span>'}
+            </td>
+            <td class="py-2.5 px-3 text-center text-slate-600">\${h.max_score ?? '-'}</td>
+            <td class="py-2.5 px-3 text-xs text-slate-500">\${h.reason || '<span class="text-slate-300">-</span>'}</td>
+            <td class="py-2.5 px-3 text-right text-xs text-slate-400">\${fmtDate(h.changed_at)}</td>
+          </tr>
+        \`).join('')}
+      </tbody>
+    </table>
+  \`
+}
+
+// ============================================================
+// 배점확인 모달
+// ============================================================
+async function showScoreCheckModal() {
+  document.getElementById('modal-score-check').classList.add('open')
+  const container = document.getElementById('score-check-content')
+  container.innerHTML = '<div class="text-center text-slate-400 py-8"><i class="fas fa-spinner fa-spin mr-2"></i>계산 중...</div>'
+
+  const data = await api('/items/score-check')
+  if (!data) { container.innerHTML = '<div class="text-center text-slate-400 py-8">데이터 없음</div>'; return }
+
+  const { rows, common_score } = data
+
+  container.innerHTML = \`
+    <!-- 공통 항목 합산 -->
+    <div class="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-5">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-2">
+          <div class="w-2 h-2 rounded-full bg-slate-400"></div>
+          <span class="text-sm font-medium text-slate-600">공통 항목 합산</span>
+          <span class="text-xs text-slate-400">(전 직책 공통 적용)</span>
+        </div>
+        <span class="text-lg font-bold text-slate-700">\${common_score}점</span>
+      </div>
+    </div>
+
+    <!-- 직책별 -->
+    <div class="space-y-3">
+      \${rows.map((r: any) => {
+        const total = r.total_score || 0
+        const over = total > 100
+        const warn = total === 100
+        return \`
+        <div class="border rounded-xl p-4 \${over ? 'border-red-300 bg-red-50' : warn ? 'border-emerald-300 bg-emerald-50' : 'border-slate-200 bg-white'}">
+          <div class="flex items-center justify-between mb-2">
+            <div class="flex items-center gap-2">
+              <div class="w-2.5 h-2.5 rounded-full" style="background:\${r.color}"></div>
+              <span class="text-sm font-semibold text-slate-700">\${r.position_name}</span>
+            </div>
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-slate-400">공통 \${common_score}점 + 전용 \${r.dedicated_score || 0}점</span>
+              <span class="text-xl font-bold \${over ? 'text-red-600' : warn ? 'text-emerald-600' : 'text-slate-800'}">\${total}점</span>
+              \${over ? '<span class="text-xs font-bold text-red-600 bg-red-100 px-2 py-0.5 rounded-full">⚠ 100점 초과</span>' : ''}
+              \${warn ? '<span class="text-xs font-bold text-emerald-600 bg-emerald-100 px-2 py-0.5 rounded-full">✓ 정확</span>' : ''}
+            </div>
+          </div>
+          <!-- 진행바 -->
+          <div class="h-2 bg-slate-100 rounded-full overflow-hidden">
+            <div class="h-2 rounded-full transition-all \${over ? 'bg-red-400' : warn ? 'bg-emerald-400' : 'bg-indigo-400'}"
+              style="width:\${Math.min(total, 120) / 120 * 100}%"></div>
+          </div>
+          \${over ? \`<p class="text-xs text-red-500 mt-1.5">⚠ \${total - 100}점 초과 — 전용 항목 배점을 조정해 주세요.</p>\` : ''}
+        </div>
+        \`
+      }).join('')}
+    </div>
+    <p class="text-xs text-slate-400 mt-4 text-center">* 전용 항목이 없는 직책은 공통 항목 점수만 합산됩니다.</p>
+  \`
 }
 
 // ============================================================
